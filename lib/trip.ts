@@ -46,6 +46,7 @@ export type PackingItem = {
   id: string;
   title: string;
   owner: string;
+  ownerIds?: string[];
   done: boolean;
 };
 
@@ -162,7 +163,10 @@ export function validateTripData(value: unknown): value is TripData {
   for (const item of [...data.schedule!, ...data.packing!]) {
     if (!item || typeof item.id !== "string" || typeof item.title !== "string" || !item.title.trim() || item.title.length > 160) return false;
   }
-  if (data.schedule!.some((item) => typeof (item as ScheduleItem).time !== "string" || typeof (item as ScheduleItem).owner !== "string") || data.packing!.some((item) => typeof (item as PackingItem).owner !== "string" || typeof (item as PackingItem).done !== "boolean")) return false;
+  if (data.schedule!.some((item) => typeof (item as ScheduleItem).time !== "string" || typeof (item as ScheduleItem).owner !== "string") || data.packing!.some((item) => {
+    const packingItem = item as PackingItem;
+    return typeof packingItem.owner !== "string" || typeof packingItem.done !== "boolean" || (packingItem.ownerIds !== undefined && (!Array.isArray(packingItem.ownerIds) || new Set(packingItem.ownerIds).size !== packingItem.ownerIds.length || packingItem.ownerIds.some((id) => typeof id !== "string" || !memberIds.has(id))));
+  })) return false;
   for (const [key, item] of Object.entries(data.villa)) {
     if (typeof item !== "string" || item.length > (key === "notes" ? 1000 : 300)) return false;
   }
