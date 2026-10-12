@@ -22,6 +22,6 @@ export async function POST(request: Request) {
   const expectedHash = secrets.TRIP_CODE_HASH;
   if (!expectedHash) return json({ error: "ระบบรหัสทริปยังตั้งค่าไม่ครบ" }, 503);
   const matches = receivedHash.length === expectedHash.length && [...receivedHash].every((char, index) => char === expectedHash[index]);
-  if (!matches) return json({ error: "รหัสทริปไม่ถูกต้อง ลองตรวจอีกครั้งนะ" }, 401);
+  if (!matches) return json({ error: "ไม่พบรายการทริปนี้" }, 401);
   return json({ authenticated: true }, 200, { "set-cookie": await createTripCookie(account.id) });
 }

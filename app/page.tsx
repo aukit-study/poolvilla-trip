@@ -3,15 +3,16 @@
 import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, Check, CheckCircle2, ChevronRight, CircleHelp,
   ClipboardList, Clock3, Compass, Home as HouseIcon, LogOut, MapPin, Plus, ReceiptText,
-  Settings2, ShieldCheck, Users, Wallet, X,
+  Settings2, ShieldCheck, Users, Wallet, X, UserRound, Landmark, Copy, Upload,
 } from "lucide-react";
+import Image from "next/image";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Attendance, calculateBalances, Expense, formatBaht, initialTripData, Member,
   PackingItem, ScheduleItem, suggestPayments, TripData,
 } from "@/lib/trip";
 
-type PageKey = "home" | "people" | "money" | "plan";
+type PageKey = "home" | "people" | "money" | "plan" | "profile";
 type ModalKey = "person" | "expense" | "villa" | "schedule" | "packing" | null;
 type SavedTrip = { data: TripData; version: number };
 type Account = { id: string; name: string; email?: string };
@@ -19,8 +20,9 @@ type Account = { id: string; name: string; email?: string };
 const navItems: { key: PageKey; label: string; icon: typeof HouseIcon }[] = [
   { key: "home", label: "ภาพรวม", icon: HouseIcon },
   { key: "people", label: "สมาชิก", icon: Users },
-  { key: "money", label: "บัญชีทริป", icon: Wallet },
+  { key: "money", label: "ค่าใช้จ่าย", icon: Wallet },
   { key: "plan", label: "แพลนทริป", icon: ClipboardList },
+  { key: "profile", label: "โปรไฟล์", icon: UserRound },
 ];
 
 function makeId() { return crypto.randomUUID(); }
@@ -42,10 +44,15 @@ function Field({ label, children, hint }: { label: string; children: ReactNode; 
   return <label className="field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>;
 }
 
+function AuthBackdrop({ step }: { step: string }) {
+  return <div className="auth-backdrop-art" aria-hidden="true"><div className="auth-orbit orbit-one"/><div className="auth-orbit orbit-two"/><div className="auth-sun"/><div className="auth-wave wave-blue"/><div className="auth-wave wave-cyan"/><div className="auth-wave wave-orange"/><div className="auth-floating-card"><span/><i/><b/></div><span className="auth-step-label">{step}</span></div>;
+}
+
 function TripApp() {
   const [account, setAccount] = useState<Account | null>(null);
   const [tripAuthenticated, setTripAuthenticated] = useState(false);
   const [loginCode, setLoginCode] = useState("");
+  const [nickname, setNickname] = useState("");
   const [data, setData] = useState<TripData>(initialTripData);
   const [version, setVersion] = useState(0);
   const [activePage, setActivePage] = useState<PageKey>("home");
@@ -69,17 +76,17 @@ function TripApp() {
 
   useEffect(() => {
     const authError = new URLSearchParams(window.location.search).get("auth_error");
-    if (authError) {
-      const messages: Record<string, string> = {
-        google_not_configured: "Google Login ยังตั้งค่าไม่ครบ กรุณาติดต่อผู้จัดทริป",
-        google_login_cancelled: "ยกเลิกการเข้าสู่ระบบ Google แล้ว",
-        google_email_unverified: "บัญชี Google นี้ยังไม่ยืนยันอีเมล",
-        google_login_failed: "เข้าสู่ระบบ Google ไม่สำเร็จ ลองอีกครั้งนะ",
-      };
-      setError(messages[authError] ?? messages.google_login_failed);
-      window.history.replaceState({}, "", window.location.pathname);
-    }
+    if (authError) window.history.replaceState({}, "", window.location.pathname);
     fetch("/api/auth", { cache: "no-store" }).then((response) => response.json() as Promise<{ account: Account | null; tripAuthenticated: boolean }>).then(async (result) => {
+      if (authError) {
+        const messages: Record<string, string> = {
+          google_not_configured: "Google Login ยังตั้งค่าไม่ครบ กรุณาติดต่อผู้จัดทริป",
+          google_login_cancelled: "ยกเลิกการเข้าสู่ระบบ Google แล้ว",
+          google_email_unverified: "บัญชี Google นี้ยังไม่ยืนยันอีเมล",
+          google_login_failed: "เข้าสู่ระบบ Google ไม่สำเร็จ ลองอีกครั้งนะ",
+        };
+        setError(messages[authError] ?? messages.google_login_failed);
+      }
       setAccount(result.account);
       if (result.account && result.tripAuthenticated) await loadTrip();
       else setTripAuthenticated(false);
@@ -120,26 +127,65 @@ function TripApp() {
     finally { setBusy(false); setChecking(false); }
   };
 
+  const createTripProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/trip/profile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: nickname.trim() }) });
+      const result = await response.json() as SavedTrip & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "บันทึกชื่อเล่นไม่สำเร็จ");
+      setData(result.data); setVersion(result.version); setNickname("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "บันทึกชื่อเล่นไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
   const logout = async () => { await fetch("/api/auth", { method: "DELETE" }); setAccount(null); setTripAuthenticated(false); setActivePage("home"); };
   const balances = useMemo(() => calculateBalances(data), [data]);
-  const payments = useMemo(() => suggestPayments(balances), [balances]);
+  const payments = useMemo(() => suggestPayments(calculateBalances(data, true)), [data]);
   const totalCost = data.expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const confirmed = data.members.filter((person) => person.attendance === "going");
   const outstanding = balances.reduce((sum, balance) => sum + Math.max(0, -balance.amount), 0);
   const pageLabel = navItems.find((item) => item.key === activePage)?.label ?? "ภาพรวม";
+  const myMember = data.members.find((member) => member.accountId === account?.id);
+
+  const submitProof = async (payment: ReturnType<typeof suggestPayments>[number], file: File) => {
+    if (!myMember) return;
+    setBusy(true); setError("");
+    const repayment = { ...payment, id: makeId(), date: today(), status: "pending" as const };
+    const form = new FormData();
+    form.set("id", repayment.id); form.set("from", repayment.from); form.set("to", repayment.to);
+    form.set("amount", String(repayment.amount)); form.set("file", file);
+    try {
+      const response = await fetch("/api/payment-proof", { method: "POST", body: form });
+      const result = await response.json() as { proofId?: string; error?: string };
+      if (!response.ok || !result.proofId) throw new Error(result.error ?? "ส่งสลิปไม่สำเร็จ");
+      const next = { ...repayment, proofId: result.proofId };
+      const saved = await fetch("/api/trip", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ version, data: { ...data, repayments: [...data.repayments, next] } }) });
+      const savedResult = await saved.json() as SavedTrip & { error?: string };
+      if (!saved.ok) throw new Error(savedResult.error ?? "บันทึกรายการรอสลิปไม่สำเร็จ กรุณาโหลดหน้าใหม่");
+      setData(savedResult.data); setVersion(savedResult.version); setNotice("ส่งสลิปแล้ว รอผู้รับตรวจสอบ");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "ส่งสลิปไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
 
   if (checking) return <main className="loading-screen"><span className="brand-mark"><Compass size={20} /></span><p>กำลังเปิดทริปของเรา…</p></main>;
-  if (!account) return <main className="login-screen"><section className="login-card">
+  if (!account) return <main className="login-screen auth-screen"><AuthBackdrop step="บัญชี Google · ขั้นที่ 1 จาก 2" /><section className="login-card auth-card">
     <span className="brand-mark"><Compass size={20} /></span><p className="eyebrow">TRIP SPACE · CHIANG MAI</p>
-    <h1>เข้าสู่ระบบทริป</h1><p className="login-copy">ใช้บัญชี Google เพื่อยืนยันตัวตน แล้วใส่รหัสทริปของกลุ่มในขั้นตอนถัดไป</p>
-    <a className="google-login-button" href="/api/auth/google"><span className="google-g" aria-hidden="true">G</span><span>เข้าสู่ระบบด้วย Google</span><ChevronRight size={17} /></a>
+    <h1>เข้าทริปกับเพื่อน</h1><p className="login-copy">ล็อกอินด้วย Google เพื่อสร้างโปรไฟล์ของคุณ แล้วใส่รหัสที่เพื่อนส่งให้</p>
+    <a className="google-login-button" href="/api/auth/google"><span className="google-g" aria-hidden="true">G</span><span>ไปต่อด้วย Google</span><ChevronRight size={17} /></a>
     {error && <p className="error-note" role="alert">{error}</p>}<p className="login-foot"><ShieldCheck size={15} /> เราใช้ข้อมูลบัญชี Google เพื่อยืนยันชื่อและอีเมลเท่านั้น</p>
   </section><p className="login-caption">บ้านรมณ์ดี 4 พลูวิลล่าเชียงใหม่ · 1–2 พ.ย. 2026</p></main>;
-  if (!tripAuthenticated) return <main className="login-screen"><section className="login-card">
+  if (!tripAuthenticated) return <main className="login-screen auth-screen trip-code-screen"><AuthBackdrop step="รหัสทริป · ขั้นที่ 2 จาก 2" /><section className="login-card auth-card">
     <span className="brand-mark"><Compass size={20} /></span><p className="eyebrow">สวัสดี {account.name} · STEP 2 OF 2</p>
-    <h1>ใส่รหัสทริป</h1><p className="login-copy">บัญชีของคุณพร้อมแล้ว ใส่รหัสที่เพื่อนแชร์ให้เพื่อเปิดข้อมูลทริป</p>
-    <form onSubmit={enterTrip} className="login-form"><Field label="รหัสทริป"><input autoComplete="one-time-code" autoFocus value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="เช่น ABCD-1234" required /></Field><button className="button button-primary button-wide" disabled={busy}>{busy ? "กำลังตรวจสอบ…" : "เข้าไปที่ทริป"}<ChevronRight size={17} /></button></form>
+    <h1>รหัสทริปอยู่ไหนนะ?</h1><p className="login-copy">ใส่รหัสที่เพื่อนแชร์ไว้ แล้วเข้าไปดูแพลนกับยอดของกลุ่มได้เลย</p>
+    <form onSubmit={enterTrip} className="login-form"><Field label="รหัสทริป"><input autoComplete="one-time-code" autoFocus value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="กรอกรหัสทริป" required /></Field><button className="button button-primary button-wide" disabled={busy}>{busy ? "กำลังเช็กให้…" : "เข้าไปดูทริป"}<ChevronRight size={17} /></button></form>
     {error && <p className="error-note" role="alert">{error}</p>}<button className="auth-switch" onClick={logout}>ออกจากบัญชี</button><p className="login-foot"><ShieldCheck size={15} /> รหัสทริปช่วยจำกัดการเข้าถึงข้อมูลของกลุ่ม</p>
+  </section><p className="login-caption">บ้านรมณ์ดี 4 พลูวิลล่าเชียงใหม่ · 1–2 พ.ย. 2026</p></main>;
+
+  if (!myMember) return <main className="login-screen auth-screen nickname-screen"><AuthBackdrop step="โปรไฟล์สมาชิก · ขั้นที่ 3 จาก 3" /><section className="login-card auth-card">
+    <span className="brand-mark"><Compass size={20} /></span><p className="eyebrow">ยินดีต้อนรับ {account.name}</p>
+    <h1>เพื่อนเรียกคุณว่าอะไรดี?</h1><p className="login-copy">ใส่ชื่อเล่นที่อยากให้แสดงในรายชื่อสมาชิกและรายการค่าใช้จ่าย</p>
+    <form onSubmit={createTripProfile} className="login-form"><Field label="ชื่อเล่น"><input autoComplete="nickname" autoFocus value={nickname} onChange={(event) => setNickname(event.target.value)} placeholder="เช่น มีน, บอส, แพรว" maxLength={40} required /></Field><button className="button button-primary button-wide" disabled={busy}>{busy ? "กำลังสร้างโปรไฟล์…" : "เข้าไปเจอเพื่อน ๆ"}<ChevronRight size={17} /></button></form>
+    {error && <p className="error-note" role="alert">{error}</p>}<button className="auth-switch" onClick={logout}>ออกจากบัญชี</button><p className="login-foot"><ShieldCheck size={15} /> ชื่อนี้จะแสดงให้สมาชิกในทริปเห็น</p>
   </section><p className="login-caption">บ้านรมณ์ดี 4 พลูวิลล่าเชียงใหม่ · 1–2 พ.ย. 2026</p></main>;
 
   return <main className="app-shell">
@@ -148,16 +194,17 @@ function TripApp() {
       <div className="trip-switcher"><span className="trip-thumb"><HouseIcon size={18} /></span><div><small>กำลังวางแผน</small><b>Pool villa trip</b></div><span className="trip-dot" /></div>
       <p className="side-caption">WORKSPACE</p>
       <nav className="side-nav" aria-label="เมนูหลัก">{navItems.map(({ key, label, icon: Icon }) => <button key={key} className={`nav-link ${activePage === key ? "selected" : ""}`} onClick={() => setActivePage(key)}><Icon size={17} /><span>{label}</span>{key === "people" && <small>{data.members.length}</small>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="secure-card"><ShieldCheck size={16} /><span><b>พื้นที่ส่วนตัวของกลุ่ม</b><small>เข้าด้วยรหัสทริป</small></span></div><button className="nav-link logout-link" onClick={logout}><LogOut size={17} /><span>ออกจากทริป</span></button><div className="profile-chip"><span className="avatar avatar-you">{account.name.slice(0, 1)}</span><span><b>{account.name}</b><small>{account.email ?? "บัญชี Google"}</small></span><Settings2 size={16} /></div></div>
+      <div className="sidebar-bottom"><div className="secure-card"><ShieldCheck size={16} /><span><b>พื้นที่ส่วนตัวของกลุ่ม</b><small>เข้าด้วยรหัสทริป</small></span></div><button className="nav-link logout-link" onClick={logout}><LogOut size={17} /><span>ออกจากทริป</span></button><button className="profile-chip profile-chip-button" onClick={() => setActivePage("profile")}><span className="avatar avatar-you">{(myMember?.name ?? account.name).slice(0, 1)}</span><span><b>{myMember?.name ?? account.name}</b><small>{account.email ?? "บัญชี Google"}</small></span><Settings2 size={16} /></button></div>
     </aside>
 
     <section className="main-column">
-      <header className="topbar"><div className="mobile-brand"><span className="brand-mark"><Compass size={17} /></span><b>ทริปของเรา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> ข้อมูลกลุ่ม</span><button className="avatar avatar-you avatar-button" title="ออกจากทริป" onClick={logout}>{account.name.slice(0, 1)}</button></div></header>
+      <header className="topbar"><div className="mobile-brand"><span className="brand-mark"><Compass size={17} /></span><b>ทริปของเรา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> ข้อมูลกลุ่ม</span><button className="avatar avatar-you avatar-button" title="เปิดโปรไฟล์" onClick={() => setActivePage("profile")}>{(myMember?.name ?? account.name).slice(0, 1)}</button></div></header>
       <div className="page-content">
-        {activePage === "home" && <Overview data={data} confirmed={confirmed.length} totalCost={totalCost} outstanding={outstanding} payments={payments} balances={balances} onNavigate={setActivePage} onModal={setModal} onPay={(payment) => save((current) => ({ ...current, repayments: [...current.repayments, { ...payment, id: makeId(), date: today() }] }), "บันทึกการคืนเงินแล้ว")} />}
-        {activePage === "people" && <People data={data} balances={balances} onAdd={() => { setEditingMember(null); setModal("person"); }} onEdit={(person) => { setEditingMember(person); setModal("person"); }} onStatus={(id, attendance) => save((current) => ({ ...current, members: current.members.map((person) => person.id === id ? { ...person, attendance } : person) }))} />}
-        {activePage === "money" && <Money data={data} balances={balances} payments={payments} totalCost={totalCost} onAdd={() => { setEditingExpense(null); setModal("expense"); }} onEdit={(expense) => { setEditingExpense(expense); setModal("expense"); }} onPay={(payment) => save((current) => ({ ...current, repayments: [...current.repayments, { ...payment, id: makeId(), date: today() }] }), "บันทึกการคืนเงินแล้ว")} onDelete={(id) => save((current) => ({ ...current, expenses: current.expenses.filter((expense) => expense.id !== id) }), "ลบรายการแล้ว")} />}
+        {activePage === "home" && myMember && <Overview data={data} myMember={myMember} confirmed={confirmed.length} totalCost={totalCost} outstanding={outstanding} payments={payments} onNavigate={setActivePage} onModal={setModal} onPay={() => setActivePage("money")} />}
+        {activePage === "people" && <People data={data} balances={balances} accountId={account.id} onAdd={() => { setEditingMember(null); setModal("person"); }} onEdit={(person) => { setEditingMember(person); setModal("person"); }} onStatus={(id, attendance) => save((current) => ({ ...current, members: current.members.map((person) => person.id === id ? { ...person, attendance } : person) }))} />}
+        {activePage === "money" && <Money data={data} balances={balances} payments={payments} totalCost={totalCost} ownMemberId={myMember?.id} busy={busy} onSubmitProof={submitProof} onConfirm={(id) => save((current) => ({ ...current, repayments: current.repayments.map((repayment) => repayment.id === id ? { ...repayment, status: "confirmed" } : repayment) }), "ยืนยันการชำระเงินแล้ว")} onAdd={() => { setEditingExpense(null); setModal("expense"); }} onEdit={(expense) => { setEditingExpense(expense); setModal("expense"); }} onDelete={(id) => save((current) => ({ ...current, expenses: current.expenses.filter((expense) => expense.id !== id) }), "ลบรายการแล้ว")} />}
         {activePage === "plan" && <Plan data={data} onModal={setModal} onTogglePacking={(id) => save((current) => ({ ...current, packing: current.packing.map((item) => item.id === id ? { ...item, done: !item.done } : item) }))} onDeletePacking={(id) => save((current) => ({ ...current, packing: current.packing.filter((item) => item.id !== id) }), "ลบรายการแล้ว")} onDeleteSchedule={(id) => save((current) => ({ ...current, schedule: current.schedule.filter((item) => item.id !== id) }), "ลบกำหนดการแล้ว")} />}
+        {activePage === "profile" && myMember && <ProfilePage member={myMember} members={data.members} busy={busy} onSave={(profile) => save((current) => ({ ...current, members: current.members.map((member) => member.id === myMember.id ? { ...member, ...profile } : member) }), "บันทึกโปรไฟล์แล้ว")} />}
       </div>
       <footer className="page-footer"><span>ทริปบ้านรมณ์ดี · ข้อมูลบันทึกร่วมกัน</span><span>เชียงใหม่ <span className="footer-dot">✳</span> 01—02 พ.ย. 2026</span></footer>
     </section>
@@ -174,22 +221,34 @@ function TripApp() {
   </main>;
 }
 
-function Overview({ data, confirmed, totalCost, outstanding, payments, balances, onNavigate, onModal, onPay }: {
-  data: TripData; confirmed: number; totalCost: number; outstanding: number; balances: ReturnType<typeof calculateBalances>; payments: ReturnType<typeof suggestPayments>;
-  onNavigate: (page: PageKey) => void; onModal: (modal: ModalKey) => void; onPay: (payment: ReturnType<typeof suggestPayments>[number]) => void;
+function Overview({ data, myMember, confirmed, totalCost, outstanding, payments, onNavigate, onModal, onPay }: {
+  data: TripData; myMember: Member; confirmed: number; totalCost: number; outstanding: number; payments: ReturnType<typeof suggestPayments>;
+  onNavigate: (page: PageKey) => void; onModal: (modal: ModalKey) => void; onPay: () => void;
 }) {
-  const going = data.members.filter((person) => person.attendance === "going");
   return <>
-    <div className="page-heading"><div><p className="eyebrow">FRIENDS GETAWAY <span>·</span> CHIANG MAI</p><h1>ทริปเชียงใหม่ <span className="heading-sparkle">✳</span></h1><p className="heading-sub">วางแผนวันพักผ่อนของพวกเราให้พร้อมก่อนออกเดินทาง</p></div><button className="button button-primary" onClick={() => onModal("person")}><Plus size={17} /> เพิ่มสมาชิก</button></div>
+    <div className="page-heading"><div><p className="eyebrow">FRIENDS GETAWAY <span>·</span> CHIANG MAI</p><h1>ทริปเชียงใหม่ <span className="heading-sparkle">✳</span></h1><p className="heading-sub">1–2 พฤศจิกายน · ดูแพลน เพื่อนร่วมทริป และยอดที่ต้องเคลียร์ในที่เดียว</p></div><button className="button button-primary" onClick={() => onModal("person")}><Plus size={17} /> ชวนเพื่อนเข้าทริป</button></div>
+    <MyNextActions data={data} member={myMember} payments={payments} onNavigate={onNavigate} />
     <div className="trip-banner"><div className="banner-copy"><span className="date-chip"><CalendarDays size={14} /> 1—2 พฤศจิกายน 2026</span><h2>ถึงเวลาพักผ่อน<br />ให้เต็มที่กันแล้ว</h2><p>เชียงใหม่ · ทริปพูลวิลล่ากับเพื่อน</p><div className="banner-bottom"><span><i /> {confirmed} คนยืนยันแล้ว</span><button onClick={() => onNavigate("people")}>ดูสมาชิก <ArrowUpRight size={14} /></button></div></div><div className="banner-art" aria-hidden="true"><div className="sun-disc"/><div className="mountain mountain-back"/><div className="mountain mountain-front"/><div className="pool-water"/><div className="villa-shape"><span/><i/><b/></div><div className="palm palm-one"><i/><b/></div><div className="palm palm-two"><i/><b/></div><span className="art-label">SLOW DAYS<br /><b>IN CHIANG MAI</b></span></div></div>
     <div className="metric-grid"><Metric label="ยืนยันไปแล้ว" value={`${confirmed} คน`} icon={<Users size={18} />} detail={`${data.members.length} คนในกลุ่ม`} tone="lavender" /><Metric label="ค่าใช้จ่ายรวม" value={formatBaht(totalCost)} icon={<ReceiptText size={18} />} detail={`${data.expenses.length} รายการ`} tone="peach" /><Metric label="ยอดรอเคลียร์" value={formatBaht(outstanding)} icon={<Wallet size={18} />} detail={payments.length ? `${payments.length} รายการคืนเงิน` : "เคลียร์ครบแล้ว"} tone="mint" /></div>
     <div className="overview-grid"><section className="panel member-panel"><div className="panel-head"><div><p className="eyebrow">THE CREW</p><h2>เพื่อนร่วมทริป <span className="count-bubble">{data.members.length}</span></h2></div><button className="text-link" onClick={() => onNavigate("people")}>ดูทั้งหมด <ChevronRight size={15} /></button></div>
       {data.members.length ? <div className="crew-list">{data.members.slice(0, 4).map((person, index) => <div className="crew-row" key={person.id}><Avatar name={person.name} index={index} /><span className="crew-name"><b>{person.name}</b><small>{person.role === "organizer" ? "ผู้จัดทริป" : "สมาชิก"}</small></span><span className={`status-pill ${statusClass(person.attendance)}`}><i />{statusText(person.attendance)}</span></div>)}</div> : <EmptyState title="ยังไม่มีสมาชิกในทริป" body="เพิ่มชื่อเพื่อน แล้วชวนทุกคนเข้ามายืนยันกันได้เลย" action="เพิ่มเพื่อน" onClick={() => onModal("person")} />}
     </section><VillaCard villa={data.villa} onEdit={() => onModal("villa")} /></div>
     <div className="overview-grid lower-grid"><section className="panel settle-panel"><div className="panel-head"><div><p className="eyebrow">SETTLEMENT</p><h2>เคลียร์เงินกัน</h2></div><button className="round-link" onClick={() => onNavigate("money")} aria-label="ดูบัญชีทริป"><ArrowUpRight size={16} /></button></div>
-      {payments.length ? <div className="settle-list">{payments.slice(0, 3).map((payment, index) => <div className="settle-row" key={`${payment.from}-${payment.to}-${index}`}><div className="settle-people"><span className="mini-avatar debtor">{memberName(data, payment.from).slice(0, 1)}</span><ArrowDownLeft size={14} /><span className="mini-avatar creditor">{memberName(data, payment.to).slice(0, 1)}</span><span><b>{memberName(data, payment.from)}</b><small>คืนให้ {memberName(data, payment.to)}</small></span></div><div className="settle-amount"><b>{formatBaht(payment.amount)}</b><button onClick={() => onPay(payment)}>ทำเครื่องหมายว่าคืนแล้ว</button></div></div>)}</div> : <div className="clear-state"><span><Check size={18} /></span><div><b>ไม่มีรายการค้างชำระ</b><small>เพิ่มรายจ่ายแล้วระบบจะช่วยคำนวณให้</small></div></div>}
+      {payments.length ? <div className="settle-list">{payments.slice(0, 3).map((payment, index) => <div className="settle-row" key={`${payment.from}-${payment.to}-${index}`}><div className="settle-people"><span className="mini-avatar debtor">{memberName(data, payment.from).slice(0, 1)}</span><ArrowDownLeft size={14} /><span className="mini-avatar creditor">{memberName(data, payment.to).slice(0, 1)}</span><span><b>{memberName(data, payment.from)}</b><small>คืนให้ {memberName(data, payment.to)}</small></span></div><div className="settle-amount"><b>{formatBaht(payment.amount)}</b><button onClick={onPay}>ดูการชำระเงิน</button></div></div>)}</div> : <div className="clear-state"><span><Check size={18} /></span><div><b>ไม่มีรายการค้างชำระ</b><small>เพิ่มค่าใช้จ่ายแล้วระบบจะช่วยคิดยอดให้</small></div></div>}
     </section><section className="panel agenda-panel"><div className="panel-head"><div><p className="eyebrow">UP NEXT</p><h2>แพลนเล็ก ๆ</h2></div><button className="text-link" onClick={() => onNavigate("plan")}>ดูแพลน <ChevronRight size={15} /></button></div>{data.schedule.length ? data.schedule.slice(0, 3).map((item) => <div className="agenda-row" key={item.id}><span className="agenda-time">{item.time || "—"}</span><span><b>{item.title}</b><small>{item.owner || "ยังไม่มีผู้รับผิดชอบ"}</small></span></div>) : <EmptyState title="ยังไม่มีแพลน" body="เติมช่วงเวลาออกเดินทางหรือกิจกรรมแรกของทริป" action="เพิ่มแพลน" onClick={() => onModal("schedule")} />}</section></div>
   </>;
+}
+
+function MyNextActions({ data, member, payments, onNavigate }: { data: TripData; member: Member; payments: ReturnType<typeof suggestPayments>; onNavigate: (page: PageKey) => void }) {
+  const due = payments.find((payment) => payment.from === member.id);
+  const incoming = data.repayments.find((payment) => payment.status === "pending" && payment.to === member.id);
+  const needsPayoutInfo = payments.some((payment) => payment.to === member.id) && !member.promptPay && !member.bankAccountNumber && !member.qrDataUrl;
+  const tasks: { title: string; detail: string; action: string; page: PageKey; tone: string }[] = [];
+  if (member.attendance === "pending") tasks.push({ title: "ยืนยันว่าจะไปไหม", detail: "อัปเดตสถานะของคุณให้เพื่อนวางแผนต่อได้", action: "ยืนยันสถานะ", page: "people", tone: "blue" });
+  if (due) tasks.push({ title: `โอน ${formatBaht(due.amount)} ให้ ${memberName(data, due.to)}`, detail: "ดู QR หรือบัญชีผู้รับ แล้วแนบสลิปเมื่อโอนแล้ว", action: "ไปที่ยอดชำระ", page: "money", tone: "orange" });
+  if (incoming) tasks.push({ title: `ตรวจสลิปจาก ${memberName(data, incoming.from)}`, detail: `${formatBaht(incoming.amount)} · ยืนยันหลังตรวจยอดโอน`, action: "ตรวจสลิป", page: "money", tone: "blue" });
+  if (needsPayoutInfo) tasks.push({ title: "เพิ่มช่องทางรับเงิน", detail: "เพื่อนมีรายการต้องคืนให้คุณ แต่ยังไม่มี QR หรือเลขบัญชี", action: "เพิ่มข้อมูลรับเงิน", page: "profile", tone: "orange" });
+  return <section className="panel my-actions-panel"><div className="panel-head"><div><p className="eyebrow">FOR YOU · {member.name}</p><h2>สิ่งที่ฉันต้องทำ</h2></div><span className="action-count">{tasks.length ? `${tasks.length} รายการ` : "เรียบร้อย"}</span></div>{tasks.length ? <div className="my-action-list">{tasks.map((task, index) => <article className={`my-action-card ${task.tone}`} key={`${task.title}-${index}`}><div><b>{task.title}</b><small>{task.detail}</small></div><button className="button button-outline button-compact" onClick={() => onNavigate(task.page)}>{task.action}<ChevronRight size={14} /></button></article>)}</div> : <div className="action-clear"><CheckCircle2 size={17} /><span><b>ตอนนี้ไม่มีรายการเร่งด่วน</b><small>ข้อมูลทริปและการชำระของคุณเป็นปัจจุบันแล้ว</small></span></div>}</section>;
 }
 
 function Metric({ label, value, detail, icon, tone }: { label: string; value: string; detail: string; icon: ReactNode; tone: string }) {
@@ -200,29 +259,73 @@ function VillaCard({ villa, onEdit }: { villa: TripData["villa"]; onEdit: () => 
   return <section className="villa-card"><div className="villa-cover"><span className="villa-kicker"><MapPin size={13} /> STAY IN CHIANG MAI</span><span className="villa-orb"/><span className="villa-hills hills-back"/><span className="villa-hills hills-front"/><span className="villa-pool"/><span className="villa-building"><i/><i/><i/></span><span className="villa-palm"/></div><div className="villa-info"><div><p className="eyebrow">OUR STAY</p><h2>บ้านรมณ์ดี 4 <span>พลูวิลล่าเชียงใหม่</span></h2><p className="villa-sub">Chiang Mai · Pool villa</p></div><button className="icon-button" onClick={onEdit} aria-label="แก้ไขข้อมูลที่พัก"><Settings2 size={17} /></button></div><div className="villa-details"><div><Clock3 size={15} /><span><b>{villa.checkIn || "ยังไม่ระบุ"}</b><small>เช็กอิน</small></span></div><div><Clock3 size={15} /><span><b>{villa.checkOut || "ยังไม่ระบุ"}</b><small>เช็กเอาต์</small></span></div></div><div className="villa-bottom">{villa.address ? <span><MapPin size={14} />{villa.address}</span> : <span className="muted-location"><MapPin size={14} />เพิ่มที่อยู่หรือพิกัดไว้ที่นี่</span>}{villa.mapUrl ? <a href={villa.mapUrl} target="_blank" rel="noreferrer">เปิดแผนที่ <ArrowUpRight size={13} /></a> : <button onClick={onEdit}>เพิ่มข้อมูลที่พัก <ChevronRight size={14} /></button>}</div></section>;
 }
 
-function People({ data, balances, onAdd, onEdit, onStatus }: { data: TripData; balances: ReturnType<typeof calculateBalances>; onAdd: () => void; onEdit: (person: Member) => void; onStatus: (id: string, status: Attendance) => void }) {
-  const groups: { status: Attendance; label: string }[] = [{ status: "going", label: "ไปแน่นอน" }, { status: "pending", label: "รอตอบ" }, { status: "not-going", label: "ไม่ไป" }];
-  return <><div className="page-heading"><div><p className="eyebrow">THE CREW · {data.members.length} MEMBERS</p><h1>สมาชิกทริป</h1><p className="heading-sub">เช็กชื่อ บทบาท และสถานะของทุกคนก่อนออกเดินทาง</p></div><button className="button button-primary" onClick={onAdd}><Plus size={17} /> เพิ่มสมาชิก</button></div>
-    <div className="people-summary"><div><b>{data.members.filter((person) => person.attendance === "going").length}</b><span>ยืนยันไป</span></div><div><b>{data.members.filter((person) => person.attendance === "pending").length}</b><span>รอตอบ</span></div><div><b>{data.members.filter((person) => person.role === "organizer").length}</b><span>ผู้จัดทริป</span></div><div className="summary-note"><Users size={17} /><span>สมาชิกทุกคนแก้ข้อมูลและยืนยันสถานะได้</span></div></div>
-    {!data.members.length ? <section className="panel empty-large"><EmptyState title="เริ่มชวนเพื่อนเข้าทริป" body="เพิ่มสมาชิกในกลุ่ม แล้วให้ทุกคนอัปเดตว่าไปหรือไม่ไป" action="เพิ่มสมาชิก" onClick={onAdd} /></section> : groups.map((group) => { const members = data.members.filter((person) => person.attendance === group.status); return members.length ? <section className="panel people-group" key={group.status}><div className="panel-head"><div><p className="eyebrow">{group.status === "going" ? "CONFIRMED" : group.status === "pending" ? "AWAITING" : "NOT JOINING"}</p><h2>{group.label} <span className="count-bubble">{members.length}</span></h2></div></div><div className="people-table"><div className="table-heading"><span>ชื่อสมาชิก</span><span>บทบาท</span><span>สถานะ</span><span>ยอดสุทธิ</span><span /></div>{members.map((person, index) => { const net = balances.find((balance) => balance.memberId === person.id)?.amount ?? 0; return <div className="person-table-row" key={person.id}><span className="person-identity"><Avatar name={person.name} index={index} /><b>{person.name}</b>{person.role === "organizer" && <span className="organizer-tag">ผู้จัดทริป</span>}</span><span className="role-text">{person.role === "organizer" ? "ผู้จัดทริป" : "สมาชิก"}</span><span><select className={`status-select ${statusClass(person.attendance)}`} value={person.attendance} aria-label={`สถานะของ ${person.name}`} onChange={(event) => onStatus(person.id, event.target.value as Attendance)}><option value="pending">รอตอบ</option><option value="going">ไป</option><option value="not-going">ไม่ไป</option></select></span><span className={net > 0 ? "positive-money" : net < 0 ? "negative-money" : "muted-money"}>{net ? `${net > 0 ? "+" : "−"}${formatBaht(Math.abs(net))}` : "—"}</span><button className="icon-button small-icon" aria-label={`แก้ไข ${person.name}`} onClick={() => onEdit(person)}><Settings2 size={16} /></button></div>; })}</div></section> : null; })}
-    <div className="info-strip"><ShieldCheck size={16} /><span>สถานะ “ไปแน่นอน” จะถูกนำไปใช้เป็นค่าเริ่มต้นในการหารค่าใช้จ่ายส่วนกลาง</span></div>
+function People({ data, balances, accountId, onAdd, onEdit, onStatus }: { data: TripData; balances: ReturnType<typeof calculateBalances>; accountId: string; onAdd: () => void; onEdit: (person: Member) => void; onStatus: (id: string, status: Attendance) => void }) {
+  const groups: { status: Attendance; label: string; eyebrow: string }[] = [{ status: "going", label: "ไปแน่นอน", eyebrow: "พร้อมไป" }, { status: "pending", label: "รอตอบ", eyebrow: "รอคอนเฟิร์ม" }, { status: "not-going", label: "ไม่ไป", eyebrow: "ครั้งหน้าเจอกัน" }];
+  return <><div className="page-heading"><div><p className="eyebrow">THE CREW · {data.members.length} คน</p><h1>เพื่อนร่วมทริป</h1><p className="heading-sub">ชวนเพื่อน แล้วอัปเดตสถานะของตัวเองได้เลย</p></div><button className="button button-primary" onClick={onAdd}><Plus size={17} /> เพิ่มชื่อเพื่อน</button></div>
+    <div className="people-summary"><div><b>{data.members.filter((person) => person.attendance === "going").length}</b><span>พร้อมไป</span></div><div><b>{data.members.filter((person) => person.attendance === "pending").length}</b><span>รอตอบ</span></div><div><b>{data.members.filter((person) => person.role === "organizer").length}</b><span>คนจัดทริป</span></div><div className="summary-note"><Users size={17} /><span>แตะสถานะเพื่ออัปเดตคำตอบของคุณได้เลย</span></div></div>
+    {!data.members.length ? <section className="panel empty-large"><EmptyState title="เริ่มชวนเพื่อนกันเลย" body="เพิ่มชื่อเพื่อนในกลุ่ม แล้วให้แต่ละคนอัปเดตว่าจะไปด้วยกันไหม" action="เพิ่มชื่อเพื่อน" onClick={onAdd} /></section> : groups.map((group) => { const members = data.members.filter((person) => person.attendance === group.status); return members.length ? <section className="panel people-group" key={group.status}><div className="panel-head"><div><p className="eyebrow">{group.eyebrow}</p><h2>{group.label} <span className="count-bubble">{members.length}</span></h2></div></div><div className="member-card-grid">{members.map((person, index) => { const net = balances.find((balance) => balance.memberId === person.id)?.amount ?? 0; const isOwnProfile = person.accountId === accountId; const isOtherProfile = !!person.accountId && !isOwnProfile; return <article className="member-card" key={person.id}><div className="member-card-head"><Avatar name={person.name} index={index} /><span className="member-card-name"><b>{person.name}</b><small>{person.role === "organizer" ? "ผู้จัดทริป" : "สมาชิก"}{isOwnProfile ? " · คุณ" : ""}</small></span>{person.role === "organizer" && <span className="organizer-tag">คนจัดทริป</span>}</div><div className="member-card-balance"><span>ยอดสุทธิ</span><b className={net > 0 ? "positive-money" : net < 0 ? "negative-money" : "muted-money"}>{net ? `${net > 0 ? "+" : "−"}${formatBaht(Math.abs(net))}` : "ยังไม่มี"}</b></div><div className="member-card-actions"><label><span>สถานะ</span><select disabled={isOtherProfile} className={`status-select ${statusClass(person.attendance)}`} value={person.attendance} aria-label={`สถานะของ ${person.name}`} onChange={(event) => onStatus(person.id, event.target.value as Attendance)}><option value="pending">รอตอบ</option><option value="going">ไปแน่นอน</option><option value="not-going">ไม่ไป</option></select></label>{person.accountId ? <span className="member-edit-placeholder" /> : <button className="button button-outline button-compact" onClick={() => onEdit(person)}><Settings2 size={14} /> แก้ไข</button>}</div></article>; })}</div></section> : null; })}
+    <div className="info-strip"><ShieldCheck size={16} /><span>ค่าใช้จ่ายส่วนกลางจะหารเฉพาะคนที่ยืนยันว่าไป ปรับผู้ร่วมจ่ายได้ในแต่ละรายการ</span></div>
   </>;
 }
 
-function Money({ data, balances, payments, totalCost, onAdd, onEdit, onPay, onDelete }: { data: TripData; balances: ReturnType<typeof calculateBalances>; payments: ReturnType<typeof suggestPayments>; totalCost: number; onAdd: () => void; onEdit: (expense: Expense) => void; onPay: (payment: ReturnType<typeof suggestPayments>[number]) => void; onDelete: (id: string) => void }) {
+function Money({ data, balances, payments, totalCost, ownMemberId, busy, onSubmitProof, onConfirm, onAdd, onEdit, onDelete }: {
+  data: TripData; balances: ReturnType<typeof calculateBalances>; payments: ReturnType<typeof suggestPayments>; totalCost: number;
+  ownMemberId?: string; busy: boolean; onSubmitProof: (payment: ReturnType<typeof suggestPayments>[number], file: File) => void;
+  onConfirm: (id: string) => void; onAdd: () => void; onEdit: (expense: Expense) => void; onDelete: (id: string) => void;
+}) {
+  const [proofPayment, setProofPayment] = useState<ReturnType<typeof suggestPayments>[number] | null>(null);
   const payers = new Set(data.expenses.map((expense) => expense.paidBy));
-  return <><div className="page-heading"><div><p className="eyebrow">SHARED EXPENSES · {data.expenses.length} ITEMS</p><h1>บัญชีทริป</h1><p className="heading-sub">แยกคนสำรองจ่าย คนร่วมจ่าย และยอดที่ต้องคืนให้ชัดเจน</p></div><button className="button button-primary" onClick={onAdd}><Plus size={17} /> เพิ่มรายจ่าย</button></div>
-    <div className="money-summary"><Metric label="ค่าใช้จ่ายรวม" value={formatBaht(totalCost)} icon={<ReceiptText size={18} />} detail="ยอดที่บันทึกทั้งหมด" tone="peach" /><Metric label="ยังต้องคืน" value={formatBaht(payments.reduce((sum, payment) => sum + payment.amount, 0))} icon={<ArrowDownLeft size={18} />} detail={`${payments.length} รายการชำระ`} tone="mint" /><Metric label="คนที่สำรองจ่าย" value={`${payers.size} คน`} icon={<Wallet size={18} />} detail="ผู้จ่ายล่วงหน้า" tone="lavender" /></div>
-    <section className="panel settlement-full"><div className="panel-head"><div><p className="eyebrow">SETTLEMENT</p><h2>สรุปยอดที่ต้องคืน</h2><p className="panel-sub">ยอดสุทธิคำนวณจากรายจ่ายและการคืนเงินที่บันทึกแล้ว</p></div><span className="auto-tag"><CheckCircle2 size={14} /> คำนวณให้อัตโนมัติ</span></div>{payments.length ? <div className="settlement-table">{payments.map((payment, index) => <div className="settlement-line" key={`${payment.from}-${payment.to}-${index}`}><span className="direction-person"><Avatar name={memberName(data, payment.from)} index={index} /><span><small>ลูกหนี้</small><b>{memberName(data, payment.from)}</b></span></span><span className="payment-arrow"><i/><ArrowUpRight size={16} /><i/></span><span className="direction-person"><Avatar name={memberName(data, payment.to)} index={index + 1} /><span><small>เจ้าหนี้ · ผู้สำรองจ่าย</small><b>{memberName(data, payment.to)}</b></span></span><b className="payment-total">{formatBaht(payment.amount)}</b><button className="button button-outline button-compact" onClick={() => onPay(payment)}><Check size={15} /> คืนเงินแล้ว</button></div>)}</div> : <div className="clear-state"><span><Check size={18} /></span><div><b>ไม่มีรายการค้างชำระ</b><small>ยอดของทุกคนเคลียร์ครบแล้ว</small></div></div>}</section>
+  const pending = data.repayments.filter((repayment) => repayment.status === "pending");
+  const paid = data.repayments.filter((repayment) => repayment.status !== "pending");
+  return <><div className="page-heading"><div><p className="eyebrow">SHARED EXPENSES · {data.expenses.length} รายการ</p><h1>ค่าใช้จ่ายทริป</h1><p className="heading-sub">ดูว่าใครสำรองจ่าย ใครต้องคืน และส่งสลิปให้คนรับตรวจได้ที่นี่</p></div><button className="button button-primary" onClick={onAdd}><Plus size={17} /> เพิ่มค่าใช้จ่าย</button></div>
+    <div className="money-summary"><Metric label="ค่าใช้จ่ายรวม" value={formatBaht(totalCost)} icon={<ReceiptText size={18} />} detail="ยอดที่บันทึกทั้งหมด" tone="peach" /><Metric label="รอส่ง/ชำระ" value={formatBaht(payments.reduce((sum, payment) => sum + payment.amount, 0))} icon={<ArrowDownLeft size={18} />} detail={`${payments.length} รายการที่เหลือ`} tone="mint" /><Metric label="คนที่สำรองจ่าย" value={`${payers.size} คน`} icon={<Wallet size={18} />} detail="ผู้จ่ายล่วงหน้า" tone="lavender" /></div>
+    <section className="panel settlement-full"><div className="panel-head"><div><p className="eyebrow">SETTLEMENT</p><h2>ใครต้องโอนให้ใคร</h2><p className="panel-sub">ยอดค้าง {formatBaht(balances.reduce((sum, item) => sum + Math.max(0, -item.amount), 0))} · ปิดยอดเมื่อผู้รับตรวจสลิปแล้ว</p></div><span className="auto-tag"><CheckCircle2 size={14} /> ระบบช่วยคิดให้</span></div>{payments.length ? <div className="settlement-table">{payments.map((payment, index) => <div className="settlement-line" key={`${payment.from}-${payment.to}-${index}`}><span className="direction-person"><Avatar name={memberName(data, payment.from)} index={index} /><span><small>ลูกหนี้</small><b>{memberName(data, payment.from)}</b></span></span><span className="payment-arrow"><i/><ArrowUpRight size={16} /><i/></span><span className="direction-person"><Avatar name={memberName(data, payment.to)} index={index + 1} /><span><small>เจ้าหนี้ · ผู้สำรองจ่าย</small><b>{memberName(data, payment.to)}</b></span></span><b className="payment-total">{formatBaht(payment.amount)}</b>{ownMemberId === payment.from ? <button className="button button-outline button-compact" onClick={() => setProofPayment(payment)} disabled={busy}><Upload size={14} /> ส่งสลิป</button> : <span className="pay-hint">{ownMemberId === payment.to ? "รอผู้จ่ายส่งสลิป" : "ดูช่องทางรับเงินที่โปรไฟล์"}</span>}</div>)}</div> : <div className="clear-state"><span><Check size={18} /></span><div><b>ไม่มีรายการค้างชำระ</b><small>เพิ่มค่าใช้จ่ายแล้วระบบจะช่วยคิดยอดให้</small></div></div>}</section>
+    {pending.length > 0 && <section className="panel repayment-panel"><div className="panel-head"><div><p className="eyebrow">NEEDS REVIEW</p><h2>สลิปรอผู้รับยืนยัน <span className="count-bubble">{pending.length}</span></h2></div></div><div className="repayment-list">{pending.map((repayment) => <div key={repayment.id}><span className="paid-check pending-check"><Clock3 size={13} /></span><span><b>{memberName(data, repayment.from)}</b> ส่งเงินให้ <b>{memberName(data, repayment.to)}</b><small>{repayment.date} · รอตรวจหลักฐาน</small></span><strong>{formatBaht(repayment.amount)}</strong><a className="button button-outline button-compact" href={`/api/payment-proof?id=${encodeURIComponent(repayment.id)}`} target="_blank" rel="noreferrer">ดูสลิป</a>{ownMemberId === repayment.to && <button className="button button-primary button-compact" onClick={() => onConfirm(repayment.id)} disabled={busy}><Check size={14} /> ยืนยัน</button>}</div>)}</div></section>}
+    {paid.length > 0 && <section className="panel repayment-panel"><div className="panel-head"><div><p className="eyebrow">PAYMENT HISTORY</p><h2>ชำระแล้ว <span className="count-bubble">{paid.length}</span></h2></div></div><div className="repayment-list">{[...paid].reverse().map((repayment) => <div key={repayment.id}><span className="paid-check"><Check size={13} /></span><span><b>{memberName(data, repayment.from)}</b> คืนให้ <b>{memberName(data, repayment.to)}</b><small>{repayment.date}</small></span><strong>{formatBaht(repayment.amount)}</strong></div>)}</div></section>}
     <section className="panel expenses-panel"><div className="panel-head"><div><p className="eyebrow">EXPENSE LOG</p><h2>รายการค่าใช้จ่าย <span className="count-bubble">{data.expenses.length}</span></h2></div></div>{data.expenses.length ? <div className="expense-list">{[...data.expenses].sort((a, b) => b.date.localeCompare(a.date)).map((expense) => <article className="expense-row" key={expense.id}><span className="expense-icon"><ReceiptText size={18} /></span><span className="expense-description"><b>{expense.title}</b><small>{expense.category || "ทั่วไป"} <i>·</i> {expense.date ? new Date(`${expense.date}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "ไม่ระบุวันที่"} <i>·</i> หาร {expense.participantIds.length} คน</small></span><span className="expense-payer"><small>ออกให้ก่อนโดย</small><b>{memberName(data, expense.paidBy)}</b></span><b className="expense-amount">{formatBaht(expense.amount)}</b><span className="expense-actions"><button className="icon-button small-icon" onClick={() => onEdit(expense)} aria-label={`แก้ไข ${expense.title}`}><Settings2 size={15} /></button><button className="icon-button small-icon danger-icon" onClick={() => { if (window.confirm(`ลบรายการ “${expense.title}” ใช่ไหม?`)) onDelete(expense.id); }} aria-label={`ลบ ${expense.title}`}><X size={15} /></button></span></article>)}</div> : <EmptyState title="ยังไม่มีรายการรายจ่าย" body="เพิ่มเงินค่าที่พัก อาหาร หรือของที่ซื้อเข้ากลุ่มได้เลย" action="เพิ่มรายจ่าย" onClick={onAdd} />}</section>
-    {data.repayments.length > 0 && <section className="panel repayment-panel"><div className="panel-head"><div><p className="eyebrow">PAYMENT HISTORY</p><h2>คืนเงินแล้ว <span className="count-bubble">{data.repayments.length}</span></h2></div></div><div className="repayment-list">{[...data.repayments].reverse().map((repayment) => <div key={repayment.id}><span className="paid-check"><Check size={13} /></span><span><b>{memberName(data, repayment.from)}</b> คืนให้ <b>{memberName(data, repayment.to)}</b><small>{repayment.date}</small></span><strong>{formatBaht(repayment.amount)}</strong></div>)}</div></section>}
-    <section className="balance-footnote"><span className="info-icon"><CircleHelp size={16} /></span><p><b>วิธีคำนวณ</b><br />ยอดแต่ละรายการแบ่งเท่ากันตามรายชื่อผู้ร่วมจ่าย คนสำรองจ่ายรับยอดคืนตามส่วนที่จ่ายเกินมา สมาชิกที่ยืนยันไปจะถูกเลือกให้อัตโนมัติเมื่อเพิ่มรายการ</p></section>
+    <section className="balance-footnote"><span className="info-icon"><CircleHelp size={16} /></span><p><b>วิธีคำนวณ</b><br />ยอดแต่ละรายการแบ่งเท่ากันตามรายชื่อผู้ร่วมจ่าย การส่งสลิปจะยังไม่ตัดยอดจนกว่าผู้รับจะตรวจสอบและยืนยันแล้ว ช่องทางรับเงินของสมาชิกอยู่ในหน้าโปรไฟล์</p></section>
+    {proofPayment && <ProofDialog payment={proofPayment} payeeName={memberName(data, proofPayment.to)} busy={busy} onClose={() => setProofPayment(null)} onSubmit={(file) => { onSubmitProof(proofPayment, file); setProofPayment(null); }} />}
+  </>;
+}
+
+function ProofDialog({ payment, payeeName, busy, onClose, onSubmit }: { payment: ReturnType<typeof suggestPayments>[number]; payeeName: string; busy: boolean; onClose: () => void; onSubmit: (file: File) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState("");
+  return <Dialog title="แนบสลิปโอนเงิน" onClose={onClose}><form className="dialog-form" onSubmit={(event) => { event.preventDefault(); if (file) onSubmit(file); }}><p className="form-note">จ่ายให้ {payeeName} · {formatBaht(payment.amount)} ผู้รับจะเห็นสลิปและกดยืนยันก่อนยอดถูกปิด</p><Field label="รูปสลิป"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const selected = event.target.files?.[0] ?? null; if (selected && (selected.size > 700_000 || !["image/png", "image/jpeg", "image/webp"].includes(selected.type))) { setFile(null); setFileError("เลือกรูป PNG, JPG หรือ WebP ขนาดไม่เกิน 700 KB"); } else { setFile(selected); setFileError(""); } }} required /><small>รองรับ PNG, JPG และ WebP ไม่เกิน 700 KB</small></Field>{fileError && <small className="field-error">{fileError}</small>}{file && <small>เลือกแล้ว: {file.name}</small>}<div className="dialog-actions"><span/><button type="button" className="button button-outline" onClick={onClose}>ยกเลิก</button><button className="button button-primary" disabled={busy || !file}>{busy ? "กำลังส่ง…" : "ส่งสลิปให้ผู้รับ"}</button></div></form></Dialog>;
+}
+
+function ProfilePage({ member, members, busy, onSave }: { member: Member; members: Member[]; busy: boolean; onSave: (profile: Partial<Member>) => void }) {
+  const [name, setName] = useState(member.name);
+  const [promptPay, setPromptPay] = useState(member.promptPay ?? "");
+  const [bankName, setBankName] = useState(member.bankName ?? "");
+  const [bankAccountName, setBankAccountName] = useState(member.bankAccountName ?? "");
+  const [bankAccountNumber, setBankAccountNumber] = useState(member.bankAccountNumber ?? "");
+  const [qrDataUrl, setQrDataUrl] = useState(member.qrDataUrl ?? "");
+  const [fileError, setFileError] = useState("");
+  const updateQr = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.size > 180_000) { setFileError("เลือกรูปภาพขนาดไม่เกิน 180 KB"); return; }
+    const reader = new FileReader();
+    reader.onload = () => { setQrDataUrl(String(reader.result)); setFileError(""); };
+    reader.onerror = () => setFileError("อ่านไฟล์รูปไม่สำเร็จ");
+    reader.readAsDataURL(file);
+  };
+  const copy = async (value: string) => { if (value) await navigator.clipboard.writeText(value); };
+  return <><div className="page-heading"><div><p className="eyebrow">YOUR IDENTITY · PAYMENT DETAILS</p><h1>โปรไฟล์ของฉัน</h1><p className="heading-sub">ชื่อและช่องทางรับเงินนี้จะแสดงให้สมาชิกในทริปเห็น</p></div></div>
+    <section className="panel profile-form-panel"><div className="panel-head"><div><p className="eyebrow">MY PROFILE</p><h2>ข้อมูลที่ใช้ในทริป</h2></div><span className="profile-you-tag"><UserRound size={14} /> โปรไฟล์ของคุณ</span></div><form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSave({ name: name.trim(), promptPay: promptPay.trim(), bankName: bankName.trim(), bankAccountName: bankAccountName.trim(), bankAccountNumber: bankAccountNumber.trim(), qrDataUrl }); }}>
+      <Field label="ชื่อที่เพื่อนเห็น"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="ชื่อเล่น" required /></Field>
+      <div className="field-grid"><Field label="PromptPay (เบอร์หรือเลขประจำตัว)" hint="เว้นว่างได้ถ้าไม่ใช้ PromptPay"><input value={promptPay} onChange={(event) => setPromptPay(event.target.value)} maxLength={80} placeholder="เช่น เบอร์มือถือ" /></Field><Field label="ชื่อธนาคาร"><input value={bankName} onChange={(event) => setBankName(event.target.value)} maxLength={100} placeholder="เช่น กสิกรไทย" /></Field></div>
+      <div className="field-grid"><Field label="ชื่อบัญชี"><input value={bankAccountName} onChange={(event) => setBankAccountName(event.target.value)} maxLength={100} placeholder="ชื่อตามบัญชีธนาคาร" /></Field><Field label="เลขบัญชี"><input value={bankAccountNumber} onChange={(event) => setBankAccountNumber(event.target.value)} maxLength={50} placeholder="เลขบัญชีรับเงิน" /></Field></div>
+      <Field label="QR รับเงิน" hint="รูปจะแสดงให้สมาชิกในทริปเห็น · PNG/JPG/WebP ไม่เกิน 180 KB"><input type="file" accept="image/*" onChange={(event) => updateQr(event.target.files?.[0])} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>ลบ QR</button></div>}</Field>
+      {fileError && <small className="field-error">{fileError}</small>}<div className="dialog-actions"><span/><button className="button button-primary" disabled={busy}>{busy ? "กำลังบันทึก…" : "บันทึกโปรไฟล์"}</button></div>
+    </form></section>
+    <section className="panel payment-directory"><div className="panel-head"><div><p className="eyebrow">PAYMENT DIRECTORY</p><h2>ช่องทางรับเงินของสมาชิก</h2><p className="panel-sub">ข้อมูลส่วนนี้สมาชิกที่เข้ารหัสทริปแล้วมองเห็นได้</p></div><Landmark size={18} /></div><div className="payment-profile-list">{members.map((person) => <article className="payment-profile-card" key={person.id}><div className="payment-profile-head"><Avatar name={person.name} index={members.indexOf(person)} /><div><b>{person.name}</b><small>{person.accountId ? "สมาชิกที่ยืนยันตัวตนด้วย Google" : "สมาชิกที่เพิ่มในรายชื่อ"}</small></div></div>{person.promptPay && <div className="payment-detail"><span>PromptPay</span><b>{person.promptPay}</b><button className="icon-button small-icon" onClick={() => void copy(person.promptPay!)} aria-label="คัดลอก PromptPay"><Copy size={14} /></button></div>}{person.bankName && <div className="payment-detail"><span>ธนาคาร</span><b>{person.bankName}</b></div>}{person.bankAccountName && <div className="payment-detail"><span>ชื่อบัญชี</span><b>{person.bankAccountName}</b></div>}{person.bankAccountNumber && <div className="payment-detail"><span>เลขบัญชี</span><b>{person.bankAccountNumber}</b><button className="icon-button small-icon" onClick={() => void copy(person.bankAccountNumber!)} aria-label="คัดลอกเลขบัญชี"><Copy size={14} /></button></div>}{person.qrDataUrl && <Image className="payment-qr" src={person.qrDataUrl} alt={`QR รับเงินของ ${person.name}`} width={150} height={150} unoptimized />}{!person.promptPay && !person.bankName && !person.bankAccountNumber && !person.qrDataUrl && <p className="payment-empty">ยังไม่ได้เพิ่มช่องทางรับเงิน</p>}</article>)}</div></section>
   </>;
 }
 
 function Plan({ data, onModal, onTogglePacking, onDeletePacking, onDeleteSchedule }: { data: TripData; onModal: (modal: ModalKey) => void; onTogglePacking: (id: string) => void; onDeletePacking: (id: string) => void; onDeleteSchedule: (id: string) => void }) {
   const done = data.packing.filter((item) => item.done).length;
-  return <><div className="page-heading"><div><p className="eyebrow">ITINERARY · CHECKLIST</p><h1>แพลนทริป</h1><p className="heading-sub">จัดเวลาและแบ่งกันเตรียมของก่อนออกเดินทาง</p></div></div>
+  return <><div className="page-heading"><div><p className="eyebrow">ITINERARY · CHECKLIST</p><h1>แพลนของเรา</h1><p className="heading-sub">ช่วยกันเติมกิจกรรมและลิสต์ของที่ต้องเตรียมก่อนออกเดินทาง</p></div></div>
     <div className="plan-grid"><section className="panel plan-section"><div className="panel-head"><div><p className="eyebrow">ITINERARY</p><h2>กำหนดการ</h2></div><button className="button button-outline button-compact" onClick={() => onModal("schedule")}><Plus size={15} /> เพิ่มเวลา</button></div>{data.schedule.length ? <div className="timeline">{data.schedule.map((item, index) => <div className="timeline-item" key={item.id}><span className="timeline-marker">{index === 0 ? <Compass size={14} /> : <span/>}</span><span className="timeline-time">{item.time || "—"}</span><span className="timeline-copy"><b>{item.title}</b><small>{item.owner ? `คนดูแล: ${item.owner}` : "ยังไม่ได้มอบหมายคนดูแล"}</small></span><button className="icon-button small-icon danger-icon" onClick={() => onDeleteSchedule(item.id)} aria-label={`ลบ ${item.title}`}><X size={15} /></button></div>)}</div> : <EmptyState title="ยังไม่มีตารางเวลา" body="เริ่มจากกำหนดเวลาออกเดินทาง หรือเวลาเช็กอิน" action="เพิ่มกำหนดการ" onClick={() => onModal("schedule")} />}</section>
     <section className="panel plan-section packing-section"><div className="panel-head"><div><p className="eyebrow">PACKING LIST</p><h2>เตรียมไปด้วยกัน</h2></div><button className="button button-outline button-compact" onClick={() => onModal("packing")}><Plus size={15} /> เพิ่มของ</button></div>{data.packing.length ? <><div className="packing-progress"><span><i style={{ width: `${data.packing.length ? done / data.packing.length * 100 : 0}%` }}/></span><small>{done}/{data.packing.length} อย่าง</small></div><div className="packing-list">{data.packing.map((item) => <div className={`packing-row ${item.done ? "is-done" : ""}`} key={item.id}><button className="check-button" onClick={() => onTogglePacking(item.id)} aria-label={item.done ? "ยกเลิกทำเสร็จ" : "ทำเครื่องหมายว่าเตรียมแล้ว"}>{item.done && <Check size={13} />}</button><span><b>{item.title}</b><small>{item.owner || "ยังไม่มีคนรับผิดชอบ"}</small></span><button className="icon-button small-icon danger-icon" onClick={() => onDeletePacking(item.id)} aria-label={`ลบ ${item.title}`}><X size={15} /></button></div>)}</div></> : <EmptyState title="เพิ่มของที่ต้องเตรียม" body="เช่น ลำโพง ของใช้ส่วนตัว หรือวัตถุดิบทำอาหาร" action="เพิ่มรายการ" onClick={() => onModal("packing")} />}</section></div>
     <VillaCard villa={data.villa} onEdit={() => onModal("villa")} />

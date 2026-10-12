@@ -2,9 +2,15 @@ export type Attendance = "pending" | "going" | "not-going";
 
 export type Member = {
   id: string;
+  accountId?: string;
   name: string;
   role: "organizer" | "member";
   attendance: Attendance;
+  promptPay?: string;
+  bankName?: string;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  qrDataUrl?: string;
 };
 
 export type Expense = {
@@ -23,6 +29,8 @@ export type Repayment = {
   to: string;
   amount: number;
   date: string;
+  status?: "pending" | "confirmed";
+  proofId?: string;
 };
 
 export type ScheduleItem = {
@@ -69,7 +77,7 @@ export const initialTripData: TripData = {
   villa: { address: "", mapUrl: "", phone: "", checkIn: "", checkOut: "", notes: "" },
 };
 
-export function calculateBalances(data: TripData): Balance[] {
+export function calculateBalances(data: TripData, includePending = false): Balance[] {
   const balances = new Map(data.members.map((member) => [member.id, 0]));
   for (const expense of data.expenses) {
     if (!expense.participantIds.length) continue;
@@ -81,6 +89,7 @@ export function calculateBalances(data: TripData): Balance[] {
     }
   }
   for (const repayment of data.repayments) {
+    if (!includePending && repayment.status === "pending") continue;
     balances.set(repayment.from, (balances.get(repayment.from) ?? 0) + repayment.amount);
     balances.set(repayment.to, (balances.get(repayment.to) ?? 0) - repayment.amount);
   }
@@ -115,6 +124,12 @@ export function validateTripData(value: unknown): value is TripData {
     if (!member || typeof member.id !== "string" || member.id.length > 100 || typeof member.name !== "string" || !member.name.trim() || member.name.length > 80) return false;
     if (!(["organizer", "member"] as string[]).includes(member.role) || !(["pending", "going", "not-going"] as string[]).includes(member.attendance)) return false;
     if (memberIds.has(member.id)) return false;
+    if (member.accountId !== undefined && (typeof member.accountId !== "string" || member.accountId.length > 200)) return false;
+    for (const [key, max] of [["promptPay", 80], ["bankName", 100], ["bankAccountName", 100], ["bankAccountNumber", 50], ["qrDataUrl", 300_000]] as const) {
+      const field = member[key];
+      if (field !== undefined && (typeof field !== "string" || field.length > max)) return false;
+    }
+    if (member.qrDataUrl && !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(member.qrDataUrl)) return false;
     memberIds.add(member.id);
   }
   for (const expense of data.expenses!) {
@@ -122,6 +137,8 @@ export function validateTripData(value: unknown): value is TripData {
   }
   for (const repayment of data.repayments!) {
     if (!repayment || typeof repayment.id !== "string" || !memberIds.has(repayment.from) || !memberIds.has(repayment.to) || repayment.from === repayment.to || !Number.isSafeInteger(repayment.amount) || repayment.amount <= 0 || typeof repayment.date !== "string") return false;
+    if (repayment.status !== undefined && repayment.status !== "pending" && repayment.status !== "confirmed") return false;
+    if (repayment.proofId !== undefined && (typeof repayment.proofId !== "string" || repayment.proofId.length > 100)) return false;
   }
   for (const item of [...data.schedule!, ...data.packing!]) {
     if (!item || typeof item.id !== "string" || typeof item.title !== "string" || !item.title.trim() || item.title.length > 160) return false;
