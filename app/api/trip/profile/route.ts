@@ -49,6 +49,7 @@ export async function POST(request: Request) {
       if (existing) return json({ data: current, version: row.version });
       const member: Member = {
         id: crypto.randomUUID(), accountId: account.id, name: body.name.trim(),
+        googleAvatarUrl: account.picture,
         role: current.members.some((person) => person.role === "organizer") ? "member" : "organizer",
         attendance: "pending",
       };

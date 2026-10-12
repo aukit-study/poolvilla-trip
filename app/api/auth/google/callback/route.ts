@@ -6,6 +6,7 @@ type GoogleClaims = {
   sub?: string;
   name?: string;
   email?: string;
+  picture?: string;
   email_verified?: boolean | string;
   iss?: string;
   aud?: string | string[];
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
     if (!claims || claims.nonce !== state.nonce || !claims.sub || !claims.email) return fail("google_login_failed");
     if (claims.email_verified !== true && claims.email_verified !== "true") return fail("google_email_unverified");
 
-    const account = { id: `google:${claims.sub}`, name: claims.name?.trim() || claims.email, email: claims.email };
+    const account = { id: `google:${claims.sub}`, name: claims.name?.trim() || claims.email, email: claims.email, picture: claims.picture };
     const headers = new Headers({ location: new URL("/", request.url).toString(), "cache-control": "no-store" });
     headers.append("set-cookie", await createUserCookie(account));
     headers.append("set-cookie", clearTripCookie());

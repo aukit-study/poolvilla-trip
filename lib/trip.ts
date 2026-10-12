@@ -6,6 +6,8 @@ export type Member = {
   name: string;
   role: "organizer" | "member";
   attendance: Attendance;
+  googleAvatarUrl?: string;
+  avatarUrl?: string;
   promptPay?: string;
   bankName?: string;
   bankAccountName?: string;
@@ -65,6 +67,15 @@ export type TripData = {
   villa: Villa;
 };
 
+export const defaultVilla: Villa = {
+  address: "",
+  mapUrl: "https://maps.app.goo.gl/W86EeGQwGQ9t6U1Q7",
+  phone: "095-446-1871",
+  checkIn: "",
+  checkOut: "",
+  notes: "",
+};
+
 export type Balance = { memberId: string; amount: number };
 export type SuggestedPayment = { from: string; to: string; amount: number };
 
@@ -74,7 +85,7 @@ export const initialTripData: TripData = {
   repayments: [],
   schedule: [],
   packing: [],
-  villa: { address: "", mapUrl: "", phone: "", checkIn: "", checkOut: "", notes: "" },
+  villa: { ...defaultVilla },
 };
 
 export function calculateBalances(data: TripData, includePending = false): Balance[] {
@@ -125,11 +136,19 @@ export function validateTripData(value: unknown): value is TripData {
     if (!(["organizer", "member"] as string[]).includes(member.role) || !(["pending", "going", "not-going"] as string[]).includes(member.attendance)) return false;
     if (memberIds.has(member.id)) return false;
     if (member.accountId !== undefined && (typeof member.accountId !== "string" || member.accountId.length > 200)) return false;
-    for (const [key, max] of [["promptPay", 80], ["bankName", 100], ["bankAccountName", 100], ["bankAccountNumber", 50], ["qrDataUrl", 300_000]] as const) {
+    for (const [key, max] of [["promptPay", 80], ["bankName", 100], ["bankAccountName", 100], ["bankAccountNumber", 50], ["qrDataUrl", 300_000], ["googleAvatarUrl", 2048], ["avatarUrl", 250_000]] as const) {
       const field = member[key];
       if (field !== undefined && (typeof field !== "string" || field.length > max)) return false;
     }
     if (member.qrDataUrl && !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(member.qrDataUrl)) return false;
+    for (const avatar of [member.googleAvatarUrl, member.avatarUrl]) {
+      if (avatar && !/^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(avatar)) {
+        try {
+          const url = new URL(avatar);
+          if (url.protocol !== "https:" || !(url.hostname === "googleusercontent.com" || url.hostname.endsWith(".googleusercontent.com"))) return false;
+        } catch { return false; }
+      }
+    }
     memberIds.add(member.id);
   }
   for (const expense of data.expenses!) {

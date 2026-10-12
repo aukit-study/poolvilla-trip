@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { initialTripData, validateTripData, type TripData } from "@/lib/trip";
+import { defaultVilla, initialTripData, validateTripData, type Member, type TripData } from "@/lib/trip";
 import { getAccountSession, isAuthenticated } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +47,20 @@ export async function GET(request: Request) {
       const row = await readTrip();
       const data = parseState(row.state);
       if (!validateTripData(data)) return json({ error: "ข้อมูลทริปไม่ถูกต้อง" }, 500);
-      return json({ data, version: row.version, needsProfile: !data.members.some((member) => member.accountId === account.id) });
+      const members = data.members as Member[];
+      const own = members.find((member) => member.accountId === account.id);
+      const visibleData = {
+        ...data,
+        villa: {
+          ...data.villa,
+          mapUrl: data.villa.mapUrl || defaultVilla.mapUrl,
+          phone: data.villa.phone || defaultVilla.phone,
+        },
+        ...(own && account.picture && !own.googleAvatarUrl
+          ? { members: members.map((member) => member.id === own.id ? { ...member, googleAvatarUrl: account.picture } : member) }
+          : {}),
+      };
+      return json({ data: visibleData, version: row.version, needsProfile: !own });
     }
     return json({ error: "โหลดข้อมูลทริปไม่สำเร็จ ลองโหลดหน้าใหม่อีกครั้ง" }, 409);
   } catch {
@@ -91,6 +104,10 @@ export async function PUT(request: Request) {
 
     const ownMember = linked.find((member) => member.accountId === account.id);
     if (!ownMember) return json({ error: "ไม่พบโปรไฟล์สมาชิกของคุณ กรุณาโหลดหน้าใหม่" }, 409);
+    const proposedOwn = next.members.find((member) => member.id === ownMember.id);
+    if (proposedOwn && (proposedOwn.promptPay !== ownMember.promptPay || proposedOwn.qrDataUrl !== ownMember.qrDataUrl) && (!proposedOwn.promptPay?.trim() || !proposedOwn.qrDataUrl)) {
+      return json({ error: "กรุณาระบุ PromptPay และ QR รับเงินให้ครบก่อนบันทึกโปรไฟล์" }, 400);
+    }
     const sql = database();
     const oldRepayments = new Map(current.repayments.map((repayment) => [repayment.id, repayment]));
     const newRepayments = new Map(next.repayments.map((repayment) => [repayment.id, repayment]));

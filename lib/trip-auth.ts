@@ -4,7 +4,7 @@ const WEEK = 60 * 60 * 24 * 7;
 const OAUTH_STATE_COOKIE = "romdee_google_oauth";
 const TEN_MINUTES = 60 * 10;
 
-export type AccountSession = { id: string; name: string; email?: string };
+export type AccountSession = { id: string; name: string; email?: string; picture?: string };
 
 function encode(bytes: Uint8Array): string {
   let binary = "";
@@ -50,7 +50,7 @@ async function issueSession(payload: Record<string, unknown>, maxAge = WEEK): Pr
 }
 
 export async function createUserCookie(account: AccountSession): Promise<string> {
-  return `${USER_COOKIE}=${await issueSession({ accountId: account.id, name: account.name, email: account.email })}; Path=/; Max-Age=${WEEK}; HttpOnly; Secure; SameSite=Lax`;
+  return `${USER_COOKIE}=${await issueSession({ accountId: account.id, name: account.name, email: account.email, picture: account.picture })}; Path=/; Max-Age=${WEEK}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 export async function createOAuthStateCookie(state: string, nonce: string): Promise<string> {
@@ -79,9 +79,10 @@ export function clearUserCookie(): string {
 }
 
 export async function getAccountSession(request: Request): Promise<AccountSession | null> {
-  const session = await readSession<{ accountId: string; name: string; email?: string; expiresAt: number }>(getCookie(request, USER_COOKIE));
+  const session = await readSession<{ accountId: string; name: string; email?: string; picture?: string; expiresAt: number }>(getCookie(request, USER_COOKIE));
   if (!session || typeof session.accountId !== "string" || typeof session.name !== "string") return null;
-  return { id: session.accountId, name: session.name, email: session.email };
+  const picture = typeof session.picture === "string" && session.picture.length <= 2048 ? session.picture : undefined;
+  return { id: session.accountId, name: session.name, email: session.email, picture };
 }
 
 export async function hasTripAccess(request: Request, accountId: string): Promise<boolean> {
