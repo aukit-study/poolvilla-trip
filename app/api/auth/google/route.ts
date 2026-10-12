@@ -1,20 +1,14 @@
-import { env } from "cloudflare:workers";
 import { createOAuthStateCookie } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
 
-function config() {
-  const values = env as unknown as { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string };
-  return values;
-}
-
 export async function GET(request: Request) {
-  const { GOOGLE_CLIENT_ID } = config();
+  const { GOOGLE_CLIENT_ID, GOOGLE_REDIRECT_URI } = process.env;
   if (!GOOGLE_CLIENT_ID) return Response.redirect(new URL("/?auth_error=google_not_configured", request.url), 303);
 
   const state = randomToken();
   const nonce = randomToken();
-  const redirectUri = new URL("/api/auth/google/callback", request.url).toString();
+  const redirectUri = GOOGLE_REDIRECT_URI || new URL("/api/auth/google/callback", request.url).toString();
   const authorization = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   authorization.search = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,

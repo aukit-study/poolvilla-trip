@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { clearOAuthStateCookie, clearTripCookie, createUserCookie, readOAuthState } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
@@ -31,9 +30,9 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   if (!code) return fail("google_login_failed");
 
-  const values = env as unknown as { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string };
+  const values = process.env as { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string; GOOGLE_REDIRECT_URI?: string };
   if (!values.GOOGLE_CLIENT_ID || !values.GOOGLE_CLIENT_SECRET) return fail("google_not_configured");
-  const redirectUri = new URL("/api/auth/google/callback", request.url).toString();
+  const redirectUri = values.GOOGLE_REDIRECT_URI || new URL("/api/auth/google/callback", request.url).toString();
 
   try {
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -78,8 +77,8 @@ async function verifyIdToken(token: string, clientId: string): Promise<GoogleCla
   if (!jwk) return null;
 
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-  const signed = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
-  const signature = decodeBase64Url(parts[2]);
+  const signed = toArrayBuffer(new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+  const signature = toArrayBuffer(decodeBase64Url(parts[2]));
   if (!await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, signed)) return null;
 
   const now = Math.floor(Date.now() / 1000);
@@ -101,4 +100,10 @@ function decodeBase64Url(value: string): Uint8Array {
   const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
   const binary = atob(padded);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
 }

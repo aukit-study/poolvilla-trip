@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { createTripCookie, getAccountSession, hashSecret } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +17,10 @@ export async function POST(request: Request) {
   }
   if (typeof body.code !== "string" || body.code.length > 64) return json({ error: "รหัสทริปไม่ถูกต้อง" }, 401);
   const normalizedCode = body.code.trim().toUpperCase().replace(/[\s-]/g, "");
-  const secrets = env as unknown as { TRIP_CODE_HASH: string };
+  const secrets = process.env as { TRIP_CODE_HASH?: string };
   const receivedHash = await hashSecret(normalizedCode);
   const expectedHash = secrets.TRIP_CODE_HASH;
+  if (!expectedHash) return json({ error: "ระบบรหัสทริปยังตั้งค่าไม่ครบ" }, 503);
   const matches = receivedHash.length === expectedHash.length && [...receivedHash].every((char, index) => char === expectedHash[index]);
   if (!matches) return json({ error: "รหัสทริปไม่ถูกต้อง ลองตรวจอีกครั้งนะ" }, 401);
   return json({ authenticated: true }, 200, { "set-cookie": await createTripCookie(account.id) });

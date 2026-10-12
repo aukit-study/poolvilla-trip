@@ -1,5 +1,3 @@
-import { env } from "cloudflare:workers";
-
 const USER_COOKIE = "romdee_user_session";
 const TRIP_COOKIE = "romdee_trip_session";
 const WEEK = 60 * 60 * 24 * 7;
@@ -20,7 +18,8 @@ function decode(value: string): Uint8Array {
 }
 
 async function mac(value: string): Promise<Uint8Array> {
-  const secret = (env as unknown as { SESSION_SECRET: string }).SESSION_SECRET;
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error("SESSION_SECRET is not configured");
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
 }
