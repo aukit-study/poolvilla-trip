@@ -56,3 +56,44 @@ body,.app-shell{font-size:15px}.nav-link{font-size:14px}.brand-lockup b{font-siz
 @media(max-width:650px){.villa-lightbox{padding:60px 12px 80px}.villa-lightbox-image{height:72vh}.villa-lightbox-close{right:13px;top:12px;width:40px;height:40px}.villa-lightbox-nav{top:auto;bottom:17px;width:42px;height:42px;transform:none}.villa-lightbox-nav:hover{transform:scale(1.05)}.villa-lightbox-nav.previous{left:calc(50% - 65px)}.villa-lightbox-nav.next{right:calc(50% - 65px)}.villa-lightbox-count{bottom:29px;font-size:12px}}
 .timeline-item{grid-template-columns:30px 92px minmax(0,1fr) 27px}.timeline-time{display:flex;flex-direction:column;gap:4px;white-space:nowrap}.timeline-time b{font-size:13px;color:#537050}.timeline-time small{font-size:10px;color:#96a197}.agenda-time{min-width:100px;white-space:nowrap;font-size:11px}
 @media(max-width:650px){.timeline-item{grid-template-columns:28px 75px minmax(0,1fr) 25px}.timeline-time b{font-size:12px}.timeline-time small{font-size:9px}.timeline-copy small{white-space:normal}.agenda-time{min-width:92px;font-size:10px}}
+@media(max-width:480px){
+  .page-content{width:100%;min-width:0;padding:18px 12px 20px}
+  .page-heading{align-items:flex-start;flex-wrap:wrap;gap:8px}
+  .page-heading>div{min-width:0;flex:1 1 100%}
+  .page-heading>.button{margin:0;max-width:100%;height:auto;min-height:40px;white-space:normal}
+  .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .metric-card{min-width:0;grid-template-columns:28px minmax(0,1fr);padding:10px;column-gap:7px}
+  .metric-card:nth-child(3){grid-column:1/-1}
+  .metric-label,.metric-value,.metric-card small{min-width:0;overflow-wrap:anywhere;white-space:normal}
+  .overview-grid,.lower-grid,.plan-grid{grid-template-columns:minmax(0,1fr)}
+  .panel,.villa-card,.metric-card{min-width:0}
+  .villa-details{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:10px}
+  .villa-details>a{grid-column:1/-1;border-left:0;padding-left:0}
+  .villa-bottom{align-items:flex-start;flex-wrap:wrap}
+  .villa-bottom>span,.villa-bottom a,.villa-bottom button{max-width:100%;white-space:normal}
+  .field-grid{grid-template-columns:minmax(0,1fr)}
+  .dialog-backdrop{align-items:stretch;place-items:stretch;padding:max(8px,env(safe-area-inset-top)) 8px max(8px,env(safe-area-inset-bottom))}
+  .dialog{width:100%;max-height:calc(100dvh - 16px);padding:18px 15px;overflow-y:auto}
+  .dialog-actions{flex-wrap:wrap;gap:7px}
+  .dialog-actions>span:first-child{flex:1 0 100%;height:0}
+  .dialog-actions .button{min-height:40px}
+  .mobile-nav small{font-size:9px}
+  .page-footer{flex-direction:column;gap:6px}
+}
+@media(max-width:360px){
+  .topbar{padding:0 11px}
+  .live-pill{font-size:8px;padding:5px 7px}
+  .page-content{padding-right:10px;padding-left:10px}
+  .metric-grid{grid-template-columns:minmax(0,1fr)}
+  .metric-card:nth-child(3){grid-column:auto}
+  .metric-card{min-height:82px;grid-template-columns:34px minmax(0,1fr)}
+  .page-heading h1{font-size:24px;letter-spacing:-.6px}
+  .people-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .people-summary .summary-note{grid-column:1/-1}
+  .settlement-line{grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);gap:4px}
+  .direction-person{min-width:0}
+  .direction-person b,.direction-person small{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .villa-details{grid-template-columns:minmax(0,1fr)}
+  .villa-details>div+div,.villa-details>a{grid-column:auto;border-left:0;padding-left:0}
+  .timeline-item{grid-template-columns:25px 66px minmax(0,1fr) 23px;gap:5px}
+}
