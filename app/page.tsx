@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { TripLoading, MobileTripNav } from "@/components/trip-motion";
+import { InstallAppPanel } from "@/components/install-app-panel";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -393,6 +394,7 @@ function ProfilePage({ member, members, googlePicture, busy, onSave }: { member:
       <Field label="QR รับเงิน (จำเป็น)" hint="ใช้ QR พร้อมเพย์หรือ QR รับเงิน · PNG/JPG/WebP ไม่เกิน 180 KB"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => updateQr(event.target.files?.[0])} required={!qrDataUrl} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>เปลี่ยน QR</button></div>}</Field>
       {fileError && <small className="field-error">{fileError}</small>}<div className="dialog-actions"><span /><button className="button button-primary" disabled={busy}>{busy ? "กำลังบันทึก…" : "บันทึกโปรไฟล์"}</button></div>
     </form></section>
+    <InstallAppPanel />
     <section className="panel payment-directory"><div className="panel-head"><div><p className="eyebrow">PAYMENT DIRECTORY</p><h2>ช่องทางรับเงินของสมาชิก</h2><p className="panel-sub">ข้อมูลส่วนนี้สมาชิกที่เข้ารหัสทริปแล้วมองเห็นได้</p></div><Landmark size={18} /></div><div className="payment-profile-list">{members.map((person) => <article className="payment-profile-card" key={person.id}><div className="payment-profile-head"><Avatar name={person.name} index={members.indexOf(person)} image={person.avatarUrl || person.googleAvatarUrl} /><div><b>{person.name}</b><small>{person.accountId ? "สมาชิกที่ยืนยันตัวตนด้วย Google" : "สมาชิกที่เพิ่มในรายชื่อ"}</small></div></div>{person.promptPay && <div className="payment-detail"><span>PromptPay</span><b>{person.promptPay}</b><button className="icon-button small-icon" onClick={() => void copy(person.promptPay!)} aria-label="คัดลอก PromptPay"><Copy size={14} /></button></div>}{person.bankName && <div className="payment-detail"><span>ธนาคาร</span><b>{person.bankName}</b></div>}{person.bankAccountName && <div className="payment-detail"><span>ชื่อบัญชี</span><b>{person.bankAccountName}</b></div>}{person.bankAccountNumber && <div className="payment-detail"><span>เลขบัญชี</span><b>{person.bankAccountNumber}</b><button className="icon-button small-icon" onClick={() => void copy(person.bankAccountNumber!)} aria-label="คัดลอกเลขบัญชี"><Copy size={14} /></button></div>}{person.qrDataUrl && <Image className="payment-qr" src={person.qrDataUrl} alt={`QR รับเงินของ ${person.name}`} width={150} height={150} unoptimized />}{(!person.promptPay || !person.qrDataUrl) && <p className="payment-empty">ยังเพิ่ม PromptPay หรือ QR รับเงินไม่ครบ</p>}</article>)}</div></section>
   </>;
 }
