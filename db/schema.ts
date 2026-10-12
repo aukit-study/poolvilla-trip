@@ -6,3 +6,4 @@ export const tripState = sqliteTable("trip_state", {
   version: integer("version").notNull().default(1),
   updatedAt: text("updated_at").notNull(),
 });
+

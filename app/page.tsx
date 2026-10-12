@@ -14,6 +14,7 @@ import {
 type PageKey = "home" | "people" | "money" | "plan";
 type ModalKey = "person" | "expense" | "villa" | "schedule" | "packing" | null;
 type SavedTrip = { data: TripData; version: number };
+type Account = { id: string; name: string; email?: string };
 
 const navItems: { key: PageKey; label: string; icon: typeof HouseIcon }[] = [
   { key: "home", label: "ภาพรวม", icon: HouseIcon },
@@ -42,7 +43,8 @@ function Field({ label, children, hint }: { label: string; children: ReactNode; 
 }
 
 function TripApp() {
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [tripAuthenticated, setTripAuthenticated] = useState(false);
   const [loginCode, setLoginCode] = useState("");
   const [data, setData] = useState<TripData>(initialTripData);
   const [version, setVersion] = useState(0);
@@ -57,18 +59,30 @@ function TripApp() {
 
   const loadTrip = useCallback(async () => {
     const response = await fetch("/api/trip", { cache: "no-store" });
-    if (response.status === 401) { setAuthenticated(false); return; }
+    if (response.status === 401) { setTripAuthenticated(false); return; }
     if (!response.ok) throw new Error("โหลดข้อมูลทริปไม่สำเร็จ");
     const result = await response.json() as SavedTrip;
     setData(result.data);
     setVersion(result.version);
-    setAuthenticated(true);
+    setTripAuthenticated(true);
   }, []);
 
   useEffect(() => {
-    fetch("/api/auth", { cache: "no-store" }).then((response) => response.json() as Promise<{ authenticated: boolean }>).then(async (result) => {
-      if (result.authenticated) await loadTrip();
-      else setAuthenticated(false);
+    const authError = new URLSearchParams(window.location.search).get("auth_error");
+    if (authError) {
+      const messages: Record<string, string> = {
+        google_not_configured: "Google Login ยังตั้งค่าไม่ครบ กรุณาติดต่อผู้จัดทริป",
+        google_login_cancelled: "ยกเลิกการเข้าสู่ระบบ Google แล้ว",
+        google_email_unverified: "บัญชี Google นี้ยังไม่ยืนยันอีเมล",
+        google_login_failed: "เข้าสู่ระบบ Google ไม่สำเร็จ ลองอีกครั้งนะ",
+      };
+      setError(messages[authError] ?? messages.google_login_failed);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    fetch("/api/auth", { cache: "no-store" }).then((response) => response.json() as Promise<{ account: Account | null; tripAuthenticated: boolean }>).then(async (result) => {
+      setAccount(result.account);
+      if (result.account && result.tripAuthenticated) await loadTrip();
+      else setTripAuthenticated(false);
     }).catch(() => setError("เชื่อมต่อระบบไม่ได้ ลองโหลดหน้าเว็บใหม่อีกครั้ง")).finally(() => setChecking(false));
   }, [loadTrip]);
 
@@ -95,18 +109,18 @@ function TripApp() {
     } finally { setBusy(false); }
   }, [data, version, loadTrip]);
 
-  const login = async (event: FormEvent<HTMLFormElement>) => {
+  const enterTrip = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const response = await fetch("/api/auth", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: loginCode }) });
+      const response = await fetch("/api/trip-access", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: loginCode }) });
       const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error ?? "รหัสไม่ถูกต้อง");
+      if (!response.ok) throw new Error(result.error ?? "รหัสทริปไม่ถูกต้อง");
       await loadTrip(); setLoginCode("");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "เข้าระบบไม่สำเร็จ"); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "เข้าใช้ทริปไม่สำเร็จ"); }
     finally { setBusy(false); setChecking(false); }
   };
 
-  const logout = async () => { await fetch("/api/auth", { method: "DELETE" }); setAuthenticated(false); setActivePage("home"); };
+  const logout = async () => { await fetch("/api/auth", { method: "DELETE" }); setAccount(null); setTripAuthenticated(false); setActivePage("home"); };
   const balances = useMemo(() => calculateBalances(data), [data]);
   const payments = useMemo(() => suggestPayments(balances), [balances]);
   const totalCost = data.expenses.reduce((sum, expense) => sum + expense.amount, 0);
@@ -114,12 +128,18 @@ function TripApp() {
   const outstanding = balances.reduce((sum, balance) => sum + Math.max(0, -balance.amount), 0);
   const pageLabel = navItems.find((item) => item.key === activePage)?.label ?? "ภาพรวม";
 
-  if (checking || authenticated === null) return <main className="loading-screen"><span className="brand-mark"><Compass size={20} /></span><p>กำลังเปิดทริปของเรา…</p></main>;
-  if (!authenticated) return <main className="login-screen"><section className="login-card">
+  if (checking) return <main className="loading-screen"><span className="brand-mark"><Compass size={20} /></span><p>กำลังเปิดทริปของเรา…</p></main>;
+  if (!account) return <main className="login-screen"><section className="login-card">
     <span className="brand-mark"><Compass size={20} /></span><p className="eyebrow">TRIP SPACE · CHIANG MAI</p>
-    <h1>ทริปนี้ของเรา</h1><p className="login-copy">ใส่รหัสทริปที่เพื่อนแชร์ให้ เพื่อดูรายชื่อ แพลน และบัญชีค่าใช้จ่ายร่วมกัน</p>
-    <form onSubmit={login} className="login-form"><Field label="รหัสทริป"><input autoComplete="one-time-code" autoFocus value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="เช่น ABCD-1234" required /></Field><button className="button button-primary button-wide" disabled={busy}>{busy ? "กำลังตรวจสอบ…" : "เข้าไปที่ทริป"}<ChevronRight size={17} /></button></form>
-    {error && <p className="error-note" role="alert">{error}</p>}<p className="login-foot"><ShieldCheck size={15} /> มีเฉพาะคนที่รู้รหัสเท่านั้นที่เข้าถึงข้อมูลได้</p>
+    <h1>เข้าสู่ระบบทริป</h1><p className="login-copy">ใช้บัญชี Google เพื่อยืนยันตัวตน แล้วใส่รหัสทริปของกลุ่มในขั้นตอนถัดไป</p>
+    <a className="google-login-button" href="/api/auth/google"><span className="google-g" aria-hidden="true">G</span><span>เข้าสู่ระบบด้วย Google</span><ChevronRight size={17} /></a>
+    {error && <p className="error-note" role="alert">{error}</p>}<p className="login-foot"><ShieldCheck size={15} /> เราใช้ข้อมูลบัญชี Google เพื่อยืนยันชื่อและอีเมลเท่านั้น</p>
+  </section><p className="login-caption">บ้านรมณ์ดี 4 พลูวิลล่าเชียงใหม่ · 1–2 พ.ย. 2026</p></main>;
+  if (!tripAuthenticated) return <main className="login-screen"><section className="login-card">
+    <span className="brand-mark"><Compass size={20} /></span><p className="eyebrow">สวัสดี {account.name} · STEP 2 OF 2</p>
+    <h1>ใส่รหัสทริป</h1><p className="login-copy">บัญชีของคุณพร้อมแล้ว ใส่รหัสที่เพื่อนแชร์ให้เพื่อเปิดข้อมูลทริป</p>
+    <form onSubmit={enterTrip} className="login-form"><Field label="รหัสทริป"><input autoComplete="one-time-code" autoFocus value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="เช่น ABCD-1234" required /></Field><button className="button button-primary button-wide" disabled={busy}>{busy ? "กำลังตรวจสอบ…" : "เข้าไปที่ทริป"}<ChevronRight size={17} /></button></form>
+    {error && <p className="error-note" role="alert">{error}</p>}<button className="auth-switch" onClick={logout}>ออกจากบัญชี</button><p className="login-foot"><ShieldCheck size={15} /> รหัสทริปช่วยจำกัดการเข้าถึงข้อมูลของกลุ่ม</p>
   </section><p className="login-caption">บ้านรมณ์ดี 4 พลูวิลล่าเชียงใหม่ · 1–2 พ.ย. 2026</p></main>;
 
   return <main className="app-shell">
@@ -128,11 +148,11 @@ function TripApp() {
       <div className="trip-switcher"><span className="trip-thumb"><HouseIcon size={18} /></span><div><small>กำลังวางแผน</small><b>Pool villa trip</b></div><span className="trip-dot" /></div>
       <p className="side-caption">WORKSPACE</p>
       <nav className="side-nav" aria-label="เมนูหลัก">{navItems.map(({ key, label, icon: Icon }) => <button key={key} className={`nav-link ${activePage === key ? "selected" : ""}`} onClick={() => setActivePage(key)}><Icon size={17} /><span>{label}</span>{key === "people" && <small>{data.members.length}</small>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="secure-card"><ShieldCheck size={16} /><span><b>พื้นที่ส่วนตัวของกลุ่ม</b><small>เข้าด้วยรหัสทริป</small></span></div><button className="nav-link logout-link" onClick={logout}><LogOut size={17} /><span>ออกจากทริป</span></button><div className="profile-chip"><span className="avatar avatar-you">ฉ</span><span><b>สมาชิกทริป</b><small>ผู้ร่วมเดินทาง</small></span><Settings2 size={16} /></div></div>
+      <div className="sidebar-bottom"><div className="secure-card"><ShieldCheck size={16} /><span><b>พื้นที่ส่วนตัวของกลุ่ม</b><small>เข้าด้วยรหัสทริป</small></span></div><button className="nav-link logout-link" onClick={logout}><LogOut size={17} /><span>ออกจากทริป</span></button><div className="profile-chip"><span className="avatar avatar-you">{account.name.slice(0, 1)}</span><span><b>{account.name}</b><small>{account.email ?? "บัญชี Google"}</small></span><Settings2 size={16} /></div></div>
     </aside>
 
     <section className="main-column">
-      <header className="topbar"><div className="mobile-brand"><span className="brand-mark"><Compass size={17} /></span><b>ทริปของเรา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> ข้อมูลกลุ่ม</span><button className="avatar avatar-you avatar-button" title="ออกจากทริป" onClick={logout}>ฉ</button></div></header>
+      <header className="topbar"><div className="mobile-brand"><span className="brand-mark"><Compass size={17} /></span><b>ทริปของเรา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> ข้อมูลกลุ่ม</span><button className="avatar avatar-you avatar-button" title="ออกจากทริป" onClick={logout}>{account.name.slice(0, 1)}</button></div></header>
       <div className="page-content">
         {activePage === "home" && <Overview data={data} confirmed={confirmed.length} totalCost={totalCost} outstanding={outstanding} payments={payments} balances={balances} onNavigate={setActivePage} onModal={setModal} onPay={(payment) => save((current) => ({ ...current, repayments: [...current.repayments, { ...payment, id: makeId(), date: today() }] }), "บันทึกการคืนเงินแล้ว")} />}
         {activePage === "people" && <People data={data} balances={balances} onAdd={() => { setEditingMember(null); setModal("person"); }} onEdit={(person) => { setEditingMember(person); setModal("person"); }} onStatus={(id, attendance) => save((current) => ({ ...current, members: current.members.map((person) => person.id === id ? { ...person, attendance } : person) }))} />}
