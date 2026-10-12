@@ -37,9 +37,11 @@ export type Repayment = {
 
 export type ScheduleItem = {
   id: string;
+  date?: string;
   time: string;
   title: string;
   owner: string;
+  ownerIds?: string[];
 };
 
 export type PackingItem = {
@@ -163,7 +165,10 @@ export function validateTripData(value: unknown): value is TripData {
   for (const item of [...data.schedule!, ...data.packing!]) {
     if (!item || typeof item.id !== "string" || typeof item.title !== "string" || !item.title.trim() || item.title.length > 160) return false;
   }
-  if (data.schedule!.some((item) => typeof (item as ScheduleItem).time !== "string" || typeof (item as ScheduleItem).owner !== "string") || data.packing!.some((item) => {
+  if (data.schedule!.some((item) => {
+    const scheduleItem = item as ScheduleItem;
+    return typeof scheduleItem.time !== "string" || typeof scheduleItem.owner !== "string" || (scheduleItem.date !== undefined && (typeof scheduleItem.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(scheduleItem.date))) || (scheduleItem.ownerIds !== undefined && (!Array.isArray(scheduleItem.ownerIds) || new Set(scheduleItem.ownerIds).size !== scheduleItem.ownerIds.length || scheduleItem.ownerIds.some((id) => typeof id !== "string" || !memberIds.has(id))));
+  }) || data.packing!.some((item) => {
     const packingItem = item as PackingItem;
     return typeof packingItem.owner !== "string" || typeof packingItem.done !== "boolean" || (packingItem.ownerIds !== undefined && (!Array.isArray(packingItem.ownerIds) || new Set(packingItem.ownerIds).size !== packingItem.ownerIds.length || packingItem.ownerIds.some((id) => typeof id !== "string" || !memberIds.has(id))));
   })) return false;
