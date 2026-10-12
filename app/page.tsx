@@ -7,6 +7,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import Image from "next/image";
+import { TripLoading, MobileTripNav } from "@/components/trip-motion";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -65,21 +66,6 @@ function TripLogoMark({ size = 35 }: { size?: number }) {
 
 function AuthBackdrop({ step }: { step: string }) {
   return <div className="auth-backdrop-art" aria-hidden="true"><div className="auth-orbit orbit-one" /><div className="auth-orbit orbit-two" /><div className="auth-sun" /><div className="auth-wave wave-blue" /><div className="auth-wave wave-cyan" /><div className="auth-wave wave-orange" /><div className="auth-floating-card"><span /><i /><b /></div><span className="auth-step-label">{step}</span></div>;
-}
-
-function LoadingScene() {
-  return <main className="loading-screen" role="status" aria-live="polite">
-    <div className="loading-landscape" aria-hidden="true">
-      <span className="loading-sun" />
-      <span className="loading-hill loading-hill-back" />
-      <span className="loading-hill loading-hill-front" />
-      <span className="loading-villa"><i /><b /><em /></span>
-      <span className="loading-pool"><i /><b /></span>
-      <span className="loading-palm"><i /><b /></span>
-    </div>
-    <div className="loading-copy"><TripLogoMark size={58} /><div><p>กำลังเตรียมทริปพลูวิลล่าหรรษา</p><small>ขอเวลาจัดกระเป๋าแป๊บนึงนะ</small><span className="loading-progress"><i /></span></div></div>
-    <div className="loading-dots" aria-hidden="true"><i /><i /><i /></div>
-  </main>;
 }
 
 function TripApp() {
@@ -200,7 +186,7 @@ function TripApp() {
     finally { setBusy(false); }
   };
 
-  if (checking) return <LoadingScene />;
+  if (checking) return <TripLoading />;
   if (!account) return <main className="login-screen auth-screen"><AuthBackdrop step="บัญชี Google · ขั้นที่ 1 จาก 2" /><section className="login-card auth-card">
     <TripLogoMark size={48} /><p className="eyebrow">TRIP SPACE · CHIANG MAI</p>
     <h1>เข้าทริปกับเพื่อน</h1><p className="login-copy">ล็อกอินด้วย Google เพื่อสร้างโปรไฟล์ของคุณ แล้วใส่รหัสที่เพื่อนส่งให้</p>
@@ -242,7 +228,7 @@ function TripApp() {
       <footer className="page-footer"><span>ทริปบ้านรมณ์ดี · ข้อมูลบันทึกร่วมกัน</span><span>เชียงใหม่ <span className="footer-dot"><Sparkles size={11} aria-hidden="true" /></span> 01—02 พ.ย. 2026</span></footer>
     </section>
 
-    <nav className="mobile-nav" aria-label="เมนู"><span>{navItems.map(({ key, label, icon: Icon }) => <button key={key} className={activePage === key ? "active" : ""} onClick={() => setActivePage(key)}><Icon size={19} /><small>{label}</small></button>)}</span></nav>
+    <MobileTripNav items={navItems} activeKey={activePage} onChange={setActivePage} />
     {notice && <div className="toast" role="status"><CheckCircle2 size={17} />{notice}</div>}
     {error && <div className="toast toast-error" role="alert"><CircleHelp size={17} />{error}<button onClick={() => setError("")} aria-label="ปิด"><X size={15} /></button></div>}
 
