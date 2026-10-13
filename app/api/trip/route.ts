@@ -122,8 +122,8 @@ export async function PUT(request: Request) {
       }
     }
     const proposedOwn = next.members.find((member) => member.id === ownMember.id);
-    if (proposedOwn && (proposedOwn.promptPay !== ownMember.promptPay || proposedOwn.qrDataUrl !== ownMember.qrDataUrl) && (!proposedOwn.promptPay?.trim() || !proposedOwn.qrDataUrl)) {
-      return json({ error: "กรุณาระบุ PromptPay และ QR รับเงินให้ครบก่อนบันทึกโปรไฟล์" }, 400);
+    if (proposedOwn && proposedOwn.promptPay !== ownMember.promptPay && !/^0\d{9}$/.test(proposedOwn.promptPay?.trim() ?? "")) {
+      return json({ error: "กรุณาระบุเบอร์มือถือที่ผูก PromptPay ให้ครบ 10 หลัก" }, 400);
     }
     const sql = database();
     const oldRepayments = new Map(current.repayments.map((repayment) => [repayment.id, repayment]));

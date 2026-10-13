@@ -7,6 +7,7 @@ import {
   Sparkles, LoaderCircle, FileDown, Crop as CropIcon,
 } from "lucide-react";
 import Image from "next/image";
+import QRCode from "qrcode";
 import { TripLoading, MobileTripNav } from "@/components/trip-motion";
 import { InstallAppPanel } from "@/components/install-app-panel";
 import { FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -41,6 +42,30 @@ function formatScheduleDate(date?: string) {
 }
 function statusText(status: Attendance) { return status === "going" ? "ไปแน่นอน" : status === "not-going" ? "ไม่ไป" : "รอตอบ"; }
 function statusClass(status: Attendance) { return status === "going" ? "status-going" : status === "not-going" ? "status-no" : "status-waiting"; }
+function normalizeThaiMobile(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (digits.startsWith("0066") && digits.length === 13) return `0${digits.slice(4)}`;
+  if (digits.startsWith("66") && digits.length === 11) return `0${digits.slice(2)}`;
+  return digits;
+}
+function isThaiMobile(value: string) { return /^0\d{9}$/.test(normalizeThaiMobile(value)); }
+function emvField(tag: string, value: string) { return `${tag}${String(value.length).padStart(2, "0")}${value}`; }
+function createPromptPayPayload(phone: string, amount: number) {
+  const mobile = normalizeThaiMobile(phone);
+  if (!isThaiMobile(mobile) || !Number.isFinite(amount) || amount <= 0) throw new Error("ข้อมูล PromptPay หรือยอดเงินไม่ถูกต้อง");
+  const promptPayAccount = emvField("00", "A000000677010111") + emvField("01", `0066${mobile.slice(1)}`);
+  const exactAmount = (Math.round((amount + Number.EPSILON) * 100) / 100).toFixed(2);
+  if (exactAmount.length > 13) throw new Error("ยอดเงินเกินขนาด QR PromptPay ที่รองรับ");
+  let payload = emvField("00", "01") + emvField("01", "12") + emvField("29", promptPayAccount) + emvField("53", "764") + emvField("54", exactAmount) + emvField("58", "TH") + "6304";
+  let crc = 0xffff;
+  for (let index = 0; index < payload.length; index += 1) {
+    crc ^= payload.charCodeAt(index) << 8;
+    for (let bit = 0; bit < 8; bit += 1) crc = crc & 0x8000 ? (crc << 1) ^ 0x1021 : crc << 1;
+    crc &= 0xffff;
+  }
+  payload += crc.toString(16).toUpperCase().padStart(4, "0");
+  return payload;
+}
 
 function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -279,12 +304,12 @@ function Overview({ data, myMember, confirmed, totalCost, outstanding, payments,
 function MyNextActions({ data, member, payments, onNavigate }: { data: TripData; member: Member; payments: ReturnType<typeof suggestPayments>; onNavigate: (page: PageKey) => void }) {
   const due = payments.find((payment) => payment.from === member.id);
   const incoming = data.repayments.find((payment) => payment.status === "pending" && payment.to === member.id);
-  const needsPayoutInfo = payments.some((payment) => payment.to === member.id) && (!member.promptPay || !member.qrDataUrl);
+  const needsPayoutInfo = payments.some((payment) => payment.to === member.id) && !isThaiMobile(member.promptPay ?? "");
   const tasks: { title: string; detail: string; action: string; page: PageKey; tone: string }[] = [];
   if (member.attendance === "pending") tasks.push({ title: "ยืนยันว่าจะไปไหม", detail: "อัปเดตสถานะของคุณให้เพื่อนวางแผนต่อได้", action: "ยืนยันสถานะ", page: "people", tone: "blue" });
   if (due) tasks.push({ title: `โอน ${formatBaht(due.amount)} ให้ ${memberName(data, due.to)}`, detail: "ดู QR หรือบัญชีผู้รับ แล้วแนบสลิปเมื่อโอนแล้ว", action: "ไปที่ยอดชำระ", page: "money", tone: "orange" });
   if (incoming) tasks.push({ title: `ตรวจสลิปจาก ${memberName(data, incoming.from)}`, detail: `${formatBaht(incoming.amount)} · ยืนยันหลังตรวจยอดโอน`, action: "ตรวจสลิป", page: "money", tone: "blue" });
-  if (needsPayoutInfo) tasks.push({ title: "เพิ่มช่องทางรับเงิน", detail: "ใส่ PromptPay และ QR เพื่อให้เพื่อนโอนคืนได้สะดวก", action: "เพิ่มข้อมูลรับเงิน", page: "profile", tone: "orange" });
+  if (needsPayoutInfo) tasks.push({ title: "เพิ่มเบอร์ PromptPay", detail: "ใส่เบอร์มือถือ 10 หลักเพื่อสร้าง QR ที่ระบุยอดโอนให้เพื่อนได้", action: "เพิ่มข้อมูลรับเงิน", page: "profile", tone: "orange" });
   return <section className="panel my-actions-panel"><div className="panel-head"><div><p className="eyebrow">FOR YOU · {member.name}</p><h2>สิ่งที่ฉันต้องทำ</h2></div><span className="action-count">{tasks.length ? `${tasks.length} รายการ` : "เรียบร้อย"}</span></div>{tasks.length ? <div className="my-action-list">{tasks.map((task, index) => <article className={`my-action-card ${task.tone}`} key={`${task.title}-${index}`}><div><b>{task.title}</b><small>{task.detail}</small></div><button className="button button-outline button-compact" onClick={() => onNavigate(task.page)}>{task.action}<ChevronRight size={14} /></button></article>)}</div> : <div className="action-clear"><CheckCircle2 size={17} /><span><b>ตอนนี้ไม่มีรายการเร่งด่วน</b><small>ข้อมูลทริปและการชำระของคุณเป็นปัจจุบันแล้ว</small></span></div>}</section>;
 }
 
@@ -350,6 +375,27 @@ function People({ data, balances, accountId, busy, onStatus }: { data: TripData;
   </>;
 }
 
+function PromptPaySettlementQr({ phone, amount, recipient }: { phone: string; amount: number; recipient: string }) {
+  const qrKey = `${phone}:${amount}`;
+  const [result, setResult] = useState<{ key: string; image?: string; error?: string }>({ key: "" });
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve().then(() => {
+      const payload = createPromptPayPayload(phone, amount);
+      return QRCode.toDataURL(payload, { errorCorrectionLevel: "M", margin: 4, width: 220, color: { dark: "#123e58", light: "#ffffff" } });
+    }).then((image) => {
+      if (active) setResult({ key: qrKey, image });
+    }).catch(() => {
+      if (active) setResult({ key: qrKey, error: "สร้าง QR ไม่สำเร็จ ตรวจสอบเบอร์พร้อมเพย์ของผู้รับ" });
+    });
+    return () => { active = false; };
+  }, [phone, amount, qrKey]);
+
+  if (result.key !== qrKey) return <div className="settlement-qr-missing">กำลังสร้าง QR…</div>;
+  if (result.error) return <div className="settlement-qr-missing">{result.error}</div>;
+  return <figure className="settlement-qr-wrap"><Image className="settlement-qr" src={result.image!} alt={`PromptPay QR สำหรับโอน ${formatBaht(amount)} ให้ ${recipient}`} width={220} height={220} unoptimized /><figcaption>สแกนเพื่อโอน {formatBaht(amount)}</figcaption></figure>;
+}
+
 function Money({ data, balances, payments, totalCost, ownMemberId, busy, onCopy, onSubmitProof, onConfirm, onAdd, onEdit, onDelete }: {
   data: TripData; balances: ReturnType<typeof calculateBalances>; payments: ReturnType<typeof suggestPayments>; totalCost: number;
   onCopy: (value: string, label: string) => void;
@@ -366,7 +412,7 @@ function Money({ data, balances, payments, totalCost, ownMemberId, busy, onCopy,
       const creditor = data.members.find((member) => member.id === payment.to);
       return <article className="settlement-item" key={`${payment.from}-${payment.to}-${index}`}>
         <div className="settlement-line"><span className="direction-person"><Avatar name={memberName(data, payment.from)} index={index} image={data.members.find((member) => member.id === payment.from)?.avatarUrl || data.members.find((member) => member.id === payment.from)?.googleAvatarUrl} /><span><small>ลูกหนี้</small><b>{memberName(data, payment.from)}</b></span></span><span className="payment-arrow"><ArrowRight size={20} /><span>โอนให้</span></span><span className="direction-person"><Avatar name={memberName(data, payment.to)} index={index + 1} image={creditor?.avatarUrl || creditor?.googleAvatarUrl} /><span><small>เจ้าหนี้ · ผู้สำรองจ่าย</small><b>{memberName(data, payment.to)}</b></span></span><b className="payment-total">{formatBaht(payment.amount)}</b>{ownMemberId === payment.from ? <button className="button button-outline button-compact" onClick={() => setProofPayment(payment)} disabled={busy}><Upload size={14} /> ส่งสลิป</button> : <span className="pay-hint">{ownMemberId === payment.to ? "รอผู้จ่ายส่งสลิป" : "ดูช่องทางรับเงินที่นี่"}</span>}</div>
-        <div className="settlement-payout"><div className="settlement-payout-copy"><p className="eyebrow">ช่องทางรับเงิน · {memberName(data, payment.to)}</p>{creditor?.promptPay ? <div className="settlement-promptpay"><span>PromptPay</span><b>{creditor.promptPay}</b><button className="button button-outline button-compact" onClick={() => onCopy(creditor.promptPay!, "เลขพร้อมเพย์")} aria-label={`คัดลอกเลขพร้อมเพย์ของ ${memberName(data, payment.to)}`}><Copy size={14} /> คัดลอก</button></div> : <p className="settlement-payout-missing">เจ้าหนี้ยังไม่ได้เพิ่มเลขพร้อมเพย์</p>}<small>โอนยอดตามรายการด้านบน แล้วส่งสลิปให้เจ้าหนี้ตรวจสอบ</small></div>{creditor?.qrDataUrl ? <Image className="settlement-qr" src={creditor.qrDataUrl} alt={`QR รับเงินของ ${memberName(data, payment.to)}`} width={132} height={132} unoptimized /> : <div className="settlement-qr-missing">ยังไม่มี QR รับเงิน</div>}</div>
+        <div className="settlement-payout"><div className="settlement-payout-copy"><p className="eyebrow">ช่องทางรับเงิน · {memberName(data, payment.to)}</p>{creditor?.promptPay ? <div className="settlement-promptpay"><span>PromptPay</span><b>{creditor.promptPay}</b><button className="button button-outline button-compact" onClick={() => onCopy(creditor.promptPay!, "เลขพร้อมเพย์")} aria-label={`คัดลอกเลขพร้อมเพย์ของ ${memberName(data, payment.to)}`}><Copy size={14} /> คัดลอก</button></div> : <p className="settlement-payout-missing">เจ้าหนี้ยังไม่ได้เพิ่มเบอร์ PromptPay</p>}<small>QR นี้ระบุยอด {formatBaht(payment.amount)} ไว้แล้ว · โอนแล้วส่งสลิปให้เจ้าหนี้ตรวจ</small></div>{creditor?.promptPay && isThaiMobile(creditor.promptPay) ? <PromptPaySettlementQr phone={creditor.promptPay} amount={payment.amount} recipient={memberName(data, payment.to)} /> : <div className="settlement-qr-missing">เพิ่มเบอร์ PromptPay 10 หลักในโปรไฟล์เจ้าหนี้</div>}</div>
       </article>;
     })}</div> : <div className="clear-state"><span><Check size={18} /></span><div><b>ไม่มีรายการค้างชำระ</b><small>เพิ่มค่าใช้จ่ายแล้วระบบจะช่วยคิดยอดให้</small></div></div>}</section>
     {pending.length > 0 && <section className="panel repayment-panel"><div className="panel-head"><div><p className="eyebrow">NEEDS REVIEW</p><h2>สลิปรอผู้รับยืนยัน <span className="count-bubble">{pending.length}</span></h2></div></div><div className="repayment-list">{pending.map((repayment) => <div key={repayment.id}><span className="paid-check pending-check"><Clock3 size={13} /></span><span><b>{memberName(data, repayment.from)}</b> ส่งเงินให้ <b>{memberName(data, repayment.to)}</b><small>{repayment.date} · รอตรวจหลักฐาน</small></span><strong>{formatBaht(repayment.amount)}</strong><a className="button button-outline button-compact" href={`/api/payment-proof?id=${encodeURIComponent(repayment.id)}`} target="_blank" rel="noreferrer">ดูสลิป</a>{ownMemberId === repayment.to && <button className="button button-primary button-compact" onClick={() => onConfirm(repayment.id)} disabled={busy}><Check size={14} /> ยืนยัน</button>}</div>)}</div></section>}
@@ -386,7 +432,7 @@ function ProofDialog({ payment, payeeName, busy, onClose, onSubmit }: { payment:
 function ProfilePage({ member, members, googlePicture, busy, onSave }: { member: Member; members: Member[]; googlePicture?: string; busy: boolean; onSave: (profile: Partial<Member>) => void }) {
   const [name, setName] = useState(member.name);
   const [avatarUrl, setAvatarUrl] = useState(member.avatarUrl ?? "");
-  const [promptPay, setPromptPay] = useState(member.promptPay ?? "");
+  const [promptPay, setPromptPay] = useState(normalizeThaiMobile(member.promptPay ?? "").slice(0, 10));
   const [bankName, setBankName] = useState(member.bankName ?? "");
   const [bankAccountName, setBankAccountName] = useState(member.bankAccountName ?? "");
   const [bankAccountNumber, setBankAccountNumber] = useState(member.bankAccountNumber ?? "");
@@ -444,14 +490,14 @@ function ProfilePage({ member, members, googlePicture, busy, onSave }: { member:
     <section className="panel profile-form-panel"><div className="panel-head"><div><p className="eyebrow">MY PROFILE</p><h2>ข้อมูลที่ใช้ในทริป</h2></div><span className="profile-you-tag"><UserRound size={14} /> โปรไฟล์ของคุณ</span></div><form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSave({ name: name.trim(), avatarUrl, googleAvatarUrl: member.googleAvatarUrl || googlePicture, promptPay: promptPay.trim(), bankName: bankName.trim(), bankAccountName: bankAccountName.trim(), bankAccountNumber: bankAccountNumber.trim(), qrDataUrl }); }}>
       <div className="profile-avatar-editor"><Avatar name={name || member.name} index={0} image={visibleAvatar} /><div><b>รูปโปรไฟล์</b><small>เลือกรูปได้สูงสุด 15 MB แล้วครอปก่อนบันทึก</small><span className="button button-outline button-compact avatar-upload-button">เลือกรูปใหม่<input type="file" accept="image/png,image/jpeg,image/webp" aria-label="เลือกรูปโปรไฟล์" onChange={(event) => { updateAvatar(event.target.files?.[0]); event.target.value = ""; }} /></span>{avatarUrl && <button type="button" className="text-link avatar-reset" onClick={() => setAvatarUrl("")}>กลับไปใช้รูป Google</button>}</div></div>
       <Field label="ชื่อที่เพื่อนเห็น"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="ชื่อเล่น" required /></Field>
-      <div className="field-grid"><Field label="PromptPay (จำเป็น)" hint="ใส่เบอร์หรือเลขประจำตัวที่ผูกพร้อมเพย์"><input value={promptPay} onChange={(event) => setPromptPay(event.target.value)} maxLength={80} placeholder="เช่น เบอร์มือถือ" required /></Field><Field label="ชื่อธนาคาร (ไม่จำเป็น)" hint="กรอกเมื่ออยากให้เพื่อนโอนเข้าบัญชีธนาคาร"><input value={bankName} onChange={(event) => setBankName(event.target.value)} maxLength={100} placeholder="เช่น กสิกรไทย" /></Field></div>
+      <div className="field-grid"><Field label="เบอร์ PromptPay (จำเป็น)" hint="ใช้เบอร์มือถือที่ผูกพร้อมเพย์ 10 หลัก เพื่อสร้าง QR ที่ระบุยอดให้โดยอัตโนมัติ"><input type="tel" inputMode="numeric" value={promptPay} onChange={(event) => setPromptPay(event.target.value.replace(/\D/g, "").slice(0, 10))} maxLength={10} pattern="0[0-9]{9}" placeholder="เช่น 0812345678" required /></Field><Field label="ชื่อธนาคาร (ไม่จำเป็น)" hint="กรอกเมื่ออยากให้เพื่อนโอนเข้าบัญชีธนาคาร"><input value={bankName} onChange={(event) => setBankName(event.target.value)} maxLength={100} placeholder="เช่น กสิกรไทย" /></Field></div>
       <div className="field-grid"><Field label="ชื่อบัญชี (ไม่จำเป็น)"><input value={bankAccountName} onChange={(event) => setBankAccountName(event.target.value)} maxLength={100} placeholder="ชื่อตามบัญชีธนาคาร" /></Field><Field label="เลขบัญชี (ไม่จำเป็น)"><input value={bankAccountNumber} onChange={(event) => setBankAccountNumber(event.target.value)} maxLength={50} placeholder="เลขบัญชีรับเงิน" /></Field></div>
-      <Field label="QR รับเงิน (จำเป็น)" hint="ใช้ QR พร้อมเพย์หรือ QR รับเงิน · PNG/JPG/WebP ไม่เกิน 15 MB ระบบย่อรูปก่อนบันทึก"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void updateQr(event.target.files?.[0]); event.target.value = ""; }} required={!qrDataUrl} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>เปลี่ยน QR</button></div>}</Field>
+      <Field label="QR รับเงินสำรอง (ไม่จำเป็น)" hint="Settlement สร้าง PromptPay QR ที่ใส่ยอดให้แล้ว · ถ้าต้องการเก็บ QR รูปเดิมไว้ รองรับ PNG/JPG/WebP ไม่เกิน 15 MB"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void updateQr(event.target.files?.[0]); event.target.value = ""; }} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินสำรองของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>เปลี่ยน QR</button></div>}</Field>
       {qrProcessing && <small>กำลังย่อรูป QR ให้เหมาะกับการจัดเก็บ…</small>}{fileError && <small className="field-error">{fileError}</small>}<div className="dialog-actions"><span /><button className="button button-primary" disabled={busy || qrProcessing}>{busy ? "กำลังบันทึก…" : qrProcessing ? "กำลังเตรียม QR…" : "บันทึกโปรไฟล์"}</button></div>
     </form></section>
     {cropSource && <AvatarCropDialog source={cropSource} onClose={() => setCropSource("")} onApply={(cropped) => { setAvatarUrl(cropped); setCropSource(""); }} />}
     <InstallAppPanel />
-    <section className="panel payment-directory"><div className="panel-head"><div><p className="eyebrow">PAYMENT DIRECTORY</p><h2>ช่องทางรับเงินของสมาชิก</h2><p className="panel-sub">ข้อมูลส่วนนี้สมาชิกที่เข้ารหัสทริปแล้วมองเห็นได้</p></div><Landmark size={18} /></div><div className="payment-profile-list">{members.map((person) => <article className="payment-profile-card" key={person.id}><div className="payment-profile-head"><Avatar name={person.name} index={members.indexOf(person)} image={person.avatarUrl || person.googleAvatarUrl} /><div><b>{person.name}</b><small>{person.accountId ? "สมาชิกที่ยืนยันตัวตนด้วย Google" : "สมาชิกที่เพิ่มในรายชื่อ"}</small></div></div>{person.promptPay && <div className="payment-detail"><span>PromptPay</span><b>{person.promptPay}</b><button className="icon-button small-icon" onClick={() => void copy(person.promptPay!)} aria-label="คัดลอก PromptPay"><Copy size={14} /></button></div>}{person.bankName && <div className="payment-detail"><span>ธนาคาร</span><b>{person.bankName}</b></div>}{person.bankAccountName && <div className="payment-detail"><span>ชื่อบัญชี</span><b>{person.bankAccountName}</b></div>}{person.bankAccountNumber && <div className="payment-detail"><span>เลขบัญชี</span><b>{person.bankAccountNumber}</b><button className="icon-button small-icon" onClick={() => void copy(person.bankAccountNumber!)} aria-label="คัดลอกเลขบัญชี"><Copy size={14} /></button></div>}{person.qrDataUrl && <Image className="payment-qr" src={person.qrDataUrl} alt={`QR รับเงินของ ${person.name}`} width={150} height={150} unoptimized />}{(!person.promptPay || !person.qrDataUrl) && <p className="payment-empty">ยังเพิ่ม PromptPay หรือ QR รับเงินไม่ครบ</p>}</article>)}</div></section>
+    <section className="panel payment-directory"><div className="panel-head"><div><p className="eyebrow">PAYMENT DIRECTORY</p><h2>ช่องทางรับเงินของสมาชิก</h2><p className="panel-sub">ข้อมูลส่วนนี้สมาชิกที่เข้ารหัสทริปแล้วมองเห็นได้ · QR ยอดเงินจะแสดงใน Settlement</p></div><Landmark size={18} /></div><div className="payment-profile-list">{members.map((person) => <article className="payment-profile-card" key={person.id}><div className="payment-profile-head"><Avatar name={person.name} index={members.indexOf(person)} image={person.avatarUrl || person.googleAvatarUrl} /><div><b>{person.name}</b><small>{person.accountId ? "สมาชิกที่ยืนยันตัวตนด้วย Google" : "สมาชิกที่เพิ่มในรายชื่อ"}</small></div></div>{person.promptPay && <div className="payment-detail"><span>PromptPay</span><b>{person.promptPay}</b><button className="icon-button small-icon" onClick={() => void copy(person.promptPay!)} aria-label="คัดลอก PromptPay"><Copy size={14} /></button></div>}{person.bankName && <div className="payment-detail"><span>ธนาคาร</span><b>{person.bankName}</b></div>}{person.bankAccountName && <div className="payment-detail"><span>ชื่อบัญชี</span><b>{person.bankAccountName}</b></div>}{person.bankAccountNumber && <div className="payment-detail"><span>เลขบัญชี</span><b>{person.bankAccountNumber}</b><button className="icon-button small-icon" onClick={() => void copy(person.bankAccountNumber!)} aria-label="คัดลอกเลขบัญชี"><Copy size={14} /></button></div>}{person.qrDataUrl && <Image className="payment-qr" src={person.qrDataUrl} alt={`QR รับเงินสำรองของ ${person.name}`} width={150} height={150} unoptimized />}{!person.promptPay && <p className="payment-empty">ยังไม่ได้เพิ่มเบอร์ PromptPay</p>}</article>)}</div></section>
   </>;
 }
 
