@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { calculateBalances, initialTripData, suggestPayments, validateTripData, type TripData } from "@/lib/trip";
+import { initialTripData, suggestPayments, validateTripData, type TripData } from "@/lib/trip";
 import { getAccountSession, isAuthenticated } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     if (!trip) return json({ error: "ข้อมูลทริปไม่ถูกต้อง" }, 500);
     const payer = trip.members.find((member) => member.accountId === account.id);
     if (!payer || payer.id !== from || from === to) return json({ error: "ส่งสลิปได้เฉพาะยอดที่ต้องจ่ายจากโปรไฟล์ของคุณ" }, 403);
-    const validPayment = suggestPayments(calculateBalances(trip, true)).some((payment) => payment.from === from && payment.to === to && payment.amount === Number(amountText));
+    const validPayment = suggestPayments(trip, true).some((payment) => payment.from === from && payment.to === to && payment.amount === Number(amountText));
     if (!validPayment) return json({ error: "ยอดนี้เปลี่ยนไปแล้ว กรุณาโหลดรายการชำระเงินล่าสุด" }, 409);
     await ensureProofTable();
     const imageBase64 = Buffer.from(await file.arrayBuffer()).toString("base64");

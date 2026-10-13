@@ -81,7 +81,7 @@ export const defaultVilla: Villa = {
 };
 
 export type Balance = { memberId: string; amount: number };
-export type SuggestedPayment = { from: string; to: string; amount: number };
+export type SuggestedPayment = { from: string; to: string; amount: number; expenseId?: string };
 
 export const initialTripData: TripData = {
   members: [],
@@ -111,21 +111,34 @@ export function calculateBalances(data: TripData, includePending = false): Balan
   return [...balances].map(([memberId, amount]) => ({ memberId, amount: Math.round(amount) }));
 }
 
-export function suggestPayments(balances: Balance[]): SuggestedPayment[] {
-  const debtors = balances.filter((entry) => entry.amount < 0).map((entry) => ({ id: entry.memberId, amount: -entry.amount }));
-  const creditors = balances.filter((entry) => entry.amount > 0).map((entry) => ({ id: entry.memberId, amount: entry.amount }));
+export function suggestPayments(data: TripData, includePending = true): SuggestedPayment[] {
   const payments: SuggestedPayment[] = [];
-  let debtorIndex = 0;
-  let creditorIndex = 0;
-  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-    const amount = Math.min(debtors[debtorIndex].amount, creditors[creditorIndex].amount);
-    if (amount > 0) payments.push({ from: debtors[debtorIndex].id, to: creditors[creditorIndex].id, amount });
-    debtors[debtorIndex].amount -= amount;
-    creditors[creditorIndex].amount -= amount;
-    if (debtors[debtorIndex].amount === 0) debtorIndex += 1;
-    if (creditors[creditorIndex].amount === 0) creditorIndex += 1;
+  for (const expense of data.expenses) {
+    if (!expense.participantIds.length) continue;
+    const share = Math.floor(expense.amount / expense.participantIds.length);
+    const remainder = expense.amount % expense.participantIds.length;
+    for (const [index, memberId] of expense.participantIds.entries()) {
+      if (memberId === expense.paidBy) continue;
+      const amount = share + (index < remainder ? 1 : 0);
+      if (amount > 0) payments.push({ from: memberId, to: expense.paidBy, amount, expenseId: expense.id });
+    }
   }
-  return payments;
+
+  // Apply each repayment to the matching debtor/creditor pair, oldest expense first.
+  for (const repayment of data.repayments) {
+    if (!includePending && repayment.status === "pending") continue;
+    let remaining = repayment.amount;
+    for (const payment of payments) {
+      if (!remaining) break;
+      if (payment.from !== repayment.from || payment.to !== repayment.to || payment.amount <= 0) continue;
+      const applied = Math.min(payment.amount, remaining);
+      payment.amount -= applied;
+      remaining -= applied;
+    }
+    // Preserve overpayments and older settlements that do not match a direct expense claim.
+    if (remaining > 0) payments.push({ from: repayment.to, to: repayment.from, amount: remaining });
+  }
+  return payments.filter((payment) => payment.amount > 0);
 }
 
 export function validateTripData(value: unknown): value is TripData {
