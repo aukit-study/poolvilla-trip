@@ -4,12 +4,12 @@ import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, CircleHelp,
   ClipboardList, Clock3, Compass, Home as HouseIcon, LogOut, MapPin, Plus, ReceiptText,
   Settings2, ShieldCheck, Users, Wallet, X, UserRound, Landmark, Copy, Upload, Phone, ChevronLeft,
-  Sparkles, LoaderCircle, FileDown,
+  Sparkles, LoaderCircle, FileDown, Crop as CropIcon,
 } from "lucide-react";
 import Image from "next/image";
 import { TripLoading, MobileTripNav } from "@/components/trip-motion";
 import { InstallAppPanel } from "@/components/install-app-panel";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, PointerEvent as ReactPointerEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Attendance, calculateBalances, Expense, formatBaht, initialTripData, Member,
@@ -374,6 +374,8 @@ function ProfilePage({ member, members, googlePicture, busy, onSave }: { member:
   const [bankAccountNumber, setBankAccountNumber] = useState(member.bankAccountNumber ?? "");
   const [qrDataUrl, setQrDataUrl] = useState(member.qrDataUrl ?? "");
   const [fileError, setFileError] = useState("");
+  const [cropSource, setCropSource] = useState("");
+  useEffect(() => () => { if (cropSource) URL.revokeObjectURL(cropSource); }, [cropSource]);
   const updateQr = (file?: File) => {
     if (!file) return;
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 180_000) { setFileError("เลือกรูปภาพขนาดไม่เกิน 180 KB"); return; }
@@ -384,26 +386,76 @@ function ProfilePage({ member, members, googlePicture, busy, onSave }: { member:
   };
   const updateAvatar = (file?: File) => {
     if (!file) return;
-    if (!(["image/png", "image/jpeg", "image/webp"].includes(file.type)) || file.size > 180_000) { setFileError("เลือกรูปโปรไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 180 KB"); return; }
-    const reader = new FileReader();
-    reader.onload = () => { setAvatarUrl(String(reader.result)); setFileError(""); };
-    reader.onerror = () => setFileError("อ่านไฟล์รูปไม่สำเร็จ");
-    reader.readAsDataURL(file);
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 15_000_000) { setFileError("เลือกรูปโปรไฟล์ PNG, JPG หรือ WebP ขนาดไม่เกิน 15 MB"); return; }
+    setFileError("");
+    setCropSource(URL.createObjectURL(file));
   };
   const visibleAvatar = avatarUrl || member.googleAvatarUrl || googlePicture;
   const copy = async (value: string) => { if (value) await navigator.clipboard.writeText(value); };
   return <><div className="page-heading"><div><p className="eyebrow">YOUR IDENTITY · PAYMENT DETAILS</p><h1>โปรไฟล์ของฉัน</h1><p className="heading-sub">ชื่อและช่องทางรับเงินนี้จะแสดงให้สมาชิกในทริปเห็น</p></div></div>
     <section className="panel profile-form-panel"><div className="panel-head"><div><p className="eyebrow">MY PROFILE</p><h2>ข้อมูลที่ใช้ในทริป</h2></div><span className="profile-you-tag"><UserRound size={14} /> โปรไฟล์ของคุณ</span></div><form className="dialog-form" onSubmit={(event) => { event.preventDefault(); onSave({ name: name.trim(), avatarUrl, googleAvatarUrl: member.googleAvatarUrl || googlePicture, promptPay: promptPay.trim(), bankName: bankName.trim(), bankAccountName: bankAccountName.trim(), bankAccountNumber: bankAccountNumber.trim(), qrDataUrl }); }}>
-      <div className="profile-avatar-editor"><Avatar name={name || member.name} index={0} image={visibleAvatar} /><div><b>รูปโปรไฟล์</b><small>เริ่มต้นจากรูปบัญชี Google เปลี่ยนเป็นรูปของคุณได้</small><span className="button button-outline button-compact avatar-upload-button">เลือกรูปใหม่<input type="file" accept="image/png,image/jpeg,image/webp" aria-label="เลือกรูปโปรไฟล์" onChange={(event) => updateAvatar(event.target.files?.[0])} /></span>{avatarUrl && <button type="button" className="text-link avatar-reset" onClick={() => setAvatarUrl("")}>กลับไปใช้รูป Google</button>}</div></div>
+      <div className="profile-avatar-editor"><Avatar name={name || member.name} index={0} image={visibleAvatar} /><div><b>รูปโปรไฟล์</b><small>เลือกรูปได้สูงสุด 15 MB แล้วครอปก่อนบันทึก</small><span className="button button-outline button-compact avatar-upload-button">เลือกรูปใหม่<input type="file" accept="image/png,image/jpeg,image/webp" aria-label="เลือกรูปโปรไฟล์" onChange={(event) => { updateAvatar(event.target.files?.[0]); event.target.value = ""; }} /></span>{avatarUrl && <button type="button" className="text-link avatar-reset" onClick={() => setAvatarUrl("")}>กลับไปใช้รูป Google</button>}</div></div>
       <Field label="ชื่อที่เพื่อนเห็น"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="ชื่อเล่น" required /></Field>
       <div className="field-grid"><Field label="PromptPay (จำเป็น)" hint="ใส่เบอร์หรือเลขประจำตัวที่ผูกพร้อมเพย์"><input value={promptPay} onChange={(event) => setPromptPay(event.target.value)} maxLength={80} placeholder="เช่น เบอร์มือถือ" required /></Field><Field label="ชื่อธนาคาร (ไม่จำเป็น)" hint="กรอกเมื่ออยากให้เพื่อนโอนเข้าบัญชีธนาคาร"><input value={bankName} onChange={(event) => setBankName(event.target.value)} maxLength={100} placeholder="เช่น กสิกรไทย" /></Field></div>
       <div className="field-grid"><Field label="ชื่อบัญชี (ไม่จำเป็น)"><input value={bankAccountName} onChange={(event) => setBankAccountName(event.target.value)} maxLength={100} placeholder="ชื่อตามบัญชีธนาคาร" /></Field><Field label="เลขบัญชี (ไม่จำเป็น)"><input value={bankAccountNumber} onChange={(event) => setBankAccountNumber(event.target.value)} maxLength={50} placeholder="เลขบัญชีรับเงิน" /></Field></div>
       <Field label="QR รับเงิน (จำเป็น)" hint="ใช้ QR พร้อมเพย์หรือ QR รับเงิน · PNG/JPG/WebP ไม่เกิน 180 KB"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => updateQr(event.target.files?.[0])} required={!qrDataUrl} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>เปลี่ยน QR</button></div>}</Field>
       {fileError && <small className="field-error">{fileError}</small>}<div className="dialog-actions"><span /><button className="button button-primary" disabled={busy}>{busy ? "กำลังบันทึก…" : "บันทึกโปรไฟล์"}</button></div>
     </form></section>
+    {cropSource && <AvatarCropDialog source={cropSource} onClose={() => setCropSource("")} onApply={(cropped) => { setAvatarUrl(cropped); setCropSource(""); }} />}
     <InstallAppPanel />
     <section className="panel payment-directory"><div className="panel-head"><div><p className="eyebrow">PAYMENT DIRECTORY</p><h2>ช่องทางรับเงินของสมาชิก</h2><p className="panel-sub">ข้อมูลส่วนนี้สมาชิกที่เข้ารหัสทริปแล้วมองเห็นได้</p></div><Landmark size={18} /></div><div className="payment-profile-list">{members.map((person) => <article className="payment-profile-card" key={person.id}><div className="payment-profile-head"><Avatar name={person.name} index={members.indexOf(person)} image={person.avatarUrl || person.googleAvatarUrl} /><div><b>{person.name}</b><small>{person.accountId ? "สมาชิกที่ยืนยันตัวตนด้วย Google" : "สมาชิกที่เพิ่มในรายชื่อ"}</small></div></div>{person.promptPay && <div className="payment-detail"><span>PromptPay</span><b>{person.promptPay}</b><button className="icon-button small-icon" onClick={() => void copy(person.promptPay!)} aria-label="คัดลอก PromptPay"><Copy size={14} /></button></div>}{person.bankName && <div className="payment-detail"><span>ธนาคาร</span><b>{person.bankName}</b></div>}{person.bankAccountName && <div className="payment-detail"><span>ชื่อบัญชี</span><b>{person.bankAccountName}</b></div>}{person.bankAccountNumber && <div className="payment-detail"><span>เลขบัญชี</span><b>{person.bankAccountNumber}</b><button className="icon-button small-icon" onClick={() => void copy(person.bankAccountNumber!)} aria-label="คัดลอกเลขบัญชี"><Copy size={14} /></button></div>}{person.qrDataUrl && <Image className="payment-qr" src={person.qrDataUrl} alt={`QR รับเงินของ ${person.name}`} width={150} height={150} unoptimized />}{(!person.promptPay || !person.qrDataUrl) && <p className="payment-empty">ยังเพิ่ม PromptPay หรือ QR รับเงินไม่ครบ</p>}</article>)}</div></section>
   </>;
+}
+
+function AvatarCropDialog({ source, onClose, onApply }: { source: string; onClose: () => void; onApply: (dataUrl: string) => void }) {
+  const frameSize = 240;
+  const outputSize = 512;
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [cropError, setCropError] = useState("");
+  const fitScale = naturalSize.width ? Math.max(frameSize / naturalSize.width, frameSize / naturalSize.height) : 1;
+  const imageWidth = naturalSize.width * fitScale;
+  const imageHeight = naturalSize.height * fitScale;
+  const maxX = Math.max(0, (imageWidth * zoom - frameSize) / 2);
+  const maxY = Math.max(0, (imageHeight * zoom - frameSize) / 2);
+  const clampOffset = (x: number, y: number) => ({ x: Math.max(-maxX, Math.min(maxX, x)), y: Math.max(-maxY, Math.min(maxY, y)) });
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!naturalSize.width) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, offsetX: offset.x, offsetY: offset.y };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setOffset(clampOffset(drag.offsetX + event.clientX - drag.x, drag.offsetY + event.clientY - drag.y));
+  };
+  const applyCrop = () => {
+    const image = imageRef.current;
+    if (!image || !naturalSize.width) return;
+    const scale = fitScale * zoom;
+    const sourceWindow = frameSize / scale;
+    const sourceX = Math.max(0, Math.min(naturalSize.width - sourceWindow, (naturalSize.width - sourceWindow) / 2 - offset.x / scale));
+    const sourceY = Math.max(0, Math.min(naturalSize.height - sourceWindow, (naturalSize.height - sourceWindow) / 2 - offset.y / scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = outputSize; canvas.height = outputSize;
+    const context = canvas.getContext("2d");
+    if (!context) { setCropError("เตรียมรูปไม่สำเร็จ ลองเลือกรูปอื่นอีกครั้ง"); return; }
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, sourceX, sourceY, sourceWindow, sourceWindow, 0, 0, outputSize, outputSize);
+    for (const quality of [0.9, 0.84, 0.78, 0.72, 0.66, 0.6]) {
+      const dataUrl = canvas.toDataURL("image/jpeg", quality);
+      if (dataUrl.length <= 600_000) { onApply(dataUrl); return; }
+    }
+    setCropError("รูปนี้บันทึกแล้วยังมีขนาดใหญ่เกินไป กรุณาลองเลือกรูปอื่น");
+  };
+  return <Dialog title="ครอปรูปโปรไฟล์" onClose={onClose}><div className="avatar-crop-content"><p className="form-note">ลากรูปเพื่อจัดตำแหน่ง แล้วปรับซูมให้พอดีกับกรอบ</p><div className="avatar-crop-viewport" style={{ width: frameSize, height: frameSize }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}>
+    <Image ref={imageRef} src={source} alt="รูปตัวอย่างสำหรับครอป" width={naturalSize.width || frameSize} height={naturalSize.height || frameSize} unoptimized draggable={false} onLoad={(event) => { const image = event.currentTarget; if (image.naturalWidth * image.naturalHeight > 40_000_000) { setCropError("รูปมีความละเอียดสูงเกินไป กรุณาลดขนาดรูปก่อนเลือกอีกครั้ง"); return; } setCropError(""); setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight }); setOffset({ x: 0, y: 0 }); }} style={{ position: "absolute", maxWidth: "none", width: imageWidth || frameSize, height: imageHeight || frameSize, left: `calc(50% + ${offset.x}px)`, top: `calc(50% + ${offset.y}px)`, transform: `translate(-50%, -50%) scale(${zoom})`, transformOrigin: "center", pointerEvents: "none" }} />
+    <span className="avatar-crop-circle" aria-hidden="true" />
+  </div><label className="field crop-range"><span>ซูมรูป</span><input type="range" min="1" max="3" step="0.02" value={zoom} onChange={(event) => { const nextZoom = Number(event.target.value); setZoom(nextZoom); setOffset((current) => { const nextX = Math.max(0, (imageWidth * nextZoom - frameSize) / 2); const nextY = Math.max(0, (imageHeight * nextZoom - frameSize) / 2); return { x: Math.max(-nextX, Math.min(nextX, current.x)), y: Math.max(-nextY, Math.min(nextY, current.y)) }; }); }} /></label>
+    {cropError && <small className="field-error">{cropError}</small>}<div className="dialog-actions"><span /><button type="button" className="button button-outline" onClick={onClose}>ยกเลิก</button><button type="button" className="button button-primary" disabled={!naturalSize.width || Boolean(cropError)} onClick={applyCrop}><CropIcon size={15} /> ใช้รูปนี้</button></div></div></Dialog>;
 }
 
 function Plan({ data, onModal, onTogglePacking, onDeletePacking, onDeleteSchedule }: { data: TripData; onModal: (modal: ModalKey) => void; onTogglePacking: (id: string) => void; onDeletePacking: (id: string) => void; onDeleteSchedule: (id: string) => void }) {

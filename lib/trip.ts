@@ -140,7 +140,7 @@ export function validateTripData(value: unknown): value is TripData {
     if (!(["organizer", "member"] as string[]).includes(member.role) || !(["pending", "going", "not-going"] as string[]).includes(member.attendance)) return false;
     if (memberIds.has(member.id)) return false;
     if (member.accountId !== undefined && (typeof member.accountId !== "string" || member.accountId.length > 200)) return false;
-    for (const [key, max] of [["promptPay", 80], ["bankName", 100], ["bankAccountName", 100], ["bankAccountNumber", 50], ["qrDataUrl", 300_000], ["googleAvatarUrl", 2048], ["avatarUrl", 250_000]] as const) {
+    for (const [key, max] of [["promptPay", 80], ["bankName", 100], ["bankAccountName", 100], ["bankAccountNumber", 50], ["qrDataUrl", 300_000], ["googleAvatarUrl", 2048], ["avatarUrl", 650_000]] as const) {
       const field = member[key];
       if (field !== undefined && (typeof field !== "string" || field.length > max)) return false;
     }
