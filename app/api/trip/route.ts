@@ -114,6 +114,13 @@ export async function PUT(request: Request) {
 
     const ownMember = linked.find((member) => member.accountId === account.id);
     if (!ownMember) return json({ error: "ไม่พบโปรไฟล์สมาชิกของคุณ กรุณาโหลดหน้าใหม่" }, 409);
+    for (const previous of current.expenses) {
+      const proposed = next.expenses.find((expense) => expense.id === previous.id);
+      const unchanged = proposed && previous.title === proposed.title && previous.category === proposed.category && previous.amount === proposed.amount && previous.paidBy === proposed.paidBy && previous.date === proposed.date && JSON.stringify(previous.participantIds) === JSON.stringify(proposed.participantIds);
+      if (previous.paidBy !== ownMember.id && !unchanged) {
+        return json({ error: "แก้ไขหรือลบรายจ่ายได้เฉพาะคนที่ออกเงินให้ก่อนเท่านั้น" }, 403);
+      }
+    }
     const proposedOwn = next.members.find((member) => member.id === ownMember.id);
     if (proposedOwn && (proposedOwn.promptPay !== ownMember.promptPay || proposedOwn.qrDataUrl !== ownMember.qrDataUrl) && (!proposedOwn.promptPay?.trim() || !proposedOwn.qrDataUrl)) {
       return json({ error: "กรุณาระบุ PromptPay และ QR รับเงินให้ครบก่อนบันทึกโปรไฟล์" }, 400);
