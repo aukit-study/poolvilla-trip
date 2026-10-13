@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
-import { defaultVilla, initialTripData, validateTripData, type Member, type TripData } from "@/lib/trip";
+import { defaultVilla, formatBaht, initialTripData, validateTripData, type Member, type TripData } from "@/lib/trip";
+import { recordTripActivities, type TripActivityDraft } from "@/lib/trip-activity";
 import { getAccountSession, isAuthenticated } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
@@ -46,6 +47,56 @@ async function readTrip(): Promise<TripRow> {
 
 function parseState(state: unknown) {
   return typeof state === "string" ? JSON.parse(state) as unknown : state;
+}
+
+function describeChanges(previous: TripData, next: TripData, actor: Member): TripActivityDraft[] {
+  const changes: TripActivityDraft[] = [];
+  const add = (kind: string, summary: string, recipientMemberId?: string) => {
+    changes.push({ actorMemberId: actor.id, actorName: actor.name, kind, summary, recipientMemberId });
+  };
+  const previousExpenses = new Map(previous.expenses.map((expense) => [expense.id, expense]));
+  const nextExpenses = new Map(next.expenses.map((expense) => [expense.id, expense]));
+  for (const expense of next.expenses) {
+    const old = previousExpenses.get(expense.id);
+    if (!old) add("expense", `เพิ่มรายจ่าย “${expense.title}” · ${formatBaht(expense.amount)}`);
+    else if (JSON.stringify(old) !== JSON.stringify(expense)) add("expense", `แก้ไขรายจ่าย “${expense.title}” · ${formatBaht(expense.amount)}`);
+  }
+  for (const expense of previous.expenses) if (!nextExpenses.has(expense.id)) add("expense", `ลบรายจ่าย “${expense.title}”`);
+
+  const myOld = previous.members.find((member) => member.id === actor.id);
+  const myNew = next.members.find((member) => member.id === actor.id);
+  if (myOld && myNew && myOld.attendance !== myNew.attendance) {
+    const answer = myNew.attendance === "going" ? "ไปแน่นอน" : myNew.attendance === "not-going" ? "ไม่ไป" : "รอตอบ";
+    add("member", `อัปเดตสถานะเข้าร่วมเป็น “${answer}”`);
+  }
+  if (myOld && myNew && (myOld.name !== myNew.name || myOld.avatarUrl !== myNew.avatarUrl)) add("profile", "อัปเดตโปรไฟล์สมาชิก");
+
+  const compareItems = <T extends { id: string; title: string }>(before: T[], after: T[], kind: string, noun: string) => {
+    const beforeById = new Map(before.map((item) => [item.id, item]));
+    const afterById = new Map(after.map((item) => [item.id, item]));
+    for (const item of after) {
+      const old = beforeById.get(item.id);
+      if (!old) add(kind, `เพิ่ม${noun} “${item.title}”`);
+      else if (JSON.stringify(old) !== JSON.stringify(item)) add(kind, `อัปเดต${noun} “${item.title}”`);
+    }
+    for (const item of before) if (!afterById.has(item.id)) add(kind, `ลบ${noun} “${item.title}”`);
+  };
+  compareItems(previous.schedule, next.schedule, "schedule", "กำหนดการ");
+  compareItems(previous.packing, next.packing, "packing", "ของที่ต้องเตรียม");
+  if (JSON.stringify(previous.villa) !== JSON.stringify(next.villa)) add("villa", "อัปเดตข้อมูลที่พัก");
+
+  const oldRepayments = new Map(previous.repayments.map((repayment) => [repayment.id, repayment]));
+  for (const repayment of next.repayments) {
+    const old = oldRepayments.get(repayment.id);
+    if (!old) {
+      const payer = next.members.find((member) => member.id === repayment.from)?.name ?? "สมาชิก";
+      add("payment", `${payer} ส่งสลิปให้คุณ · ${formatBaht(repayment.amount)}`, repayment.to);
+    } else if (old.status === "pending" && repayment.status === "confirmed") {
+      const payee = next.members.find((member) => member.id === repayment.to)?.name ?? "เจ้าหนี้";
+      add("payment", `${payee} ยืนยันสลิปแล้ว · ${formatBaht(repayment.amount)}`, repayment.from);
+    }
+  }
+  return changes.slice(0, 30);
 }
 
 export async function GET(request: Request) {
@@ -159,7 +210,11 @@ export async function PUT(request: Request) {
       RETURNING state, version`;
     const row = rows[0] as TripRow | undefined;
     if (!row) return json({ error: "มีคนแก้ข้อมูลพร้อมกัน กรุณาโหลดข้อมูลล่าสุดแล้วลองอีกครั้ง" }, 409);
-    return json({ data: parseState(row.state), version: row.version });
+    const savedData = parseState(row.state) as TripData;
+    const actor = savedData.members.find((member) => member.id === ownMember.id) ?? ownMember;
+    try { await recordTripActivities(describeChanges(current, savedData, actor), sql); }
+    catch { /* Keep a successful trip update successful if the activity table is temporarily unavailable. */ }
+    return json({ data: savedData, version: row.version });
   } catch {
     return json({ error: "บันทึกไม่สำเร็จ กรุณาตรวจสอบการตั้งค่าฐานข้อมูล" }, 500);
   }

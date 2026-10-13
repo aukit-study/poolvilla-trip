@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
 import { initialTripData, validateTripData, type Member, type TripData } from "@/lib/trip";
+import { recordTripActivities } from "@/lib/trip-activity";
 import { getAccountSession, isAuthenticated } from "@/lib/trip-auth";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +73,11 @@ export async function POST(request: Request) {
         version = version + 1, updated_at = NOW() WHERE id = 1 AND version = ${row.version}
         RETURNING state, version`;
       const saved = updated[0] as TripRow | undefined;
-      if (saved) return json({ data: parseState(saved.state), version: saved.version });
+      if (saved) {
+        try { await recordTripActivities([{ actorMemberId: member.id, actorName: member.name, kind: "member", summary: "เข้าร่วมทริปแล้ว" }], sql); }
+        catch { /* Profile creation should not fail if the activity table is temporarily unavailable. */ }
+        return json({ data: parseState(saved.state), version: saved.version });
+      }
     }
     return json({ error: "บันทึกชื่อไม่สำเร็จ มีคนแก้ข้อมูลพร้อมกัน ลองอีกครั้งนะ" }, 409);
   } catch {
