@@ -4,12 +4,12 @@ import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight, CircleHelp,
   ClipboardList, Clock3, Compass, Home as HouseIcon, LogOut, MapPin, Plus, ReceiptText,
   Settings2, ShieldCheck, Users, Wallet, X, UserRound, Landmark, Copy, Upload, Phone, ChevronLeft,
-  Sparkles,
+  Sparkles, LoaderCircle,
 } from "lucide-react";
 import Image from "next/image";
 import { TripLoading, MobileTripNav } from "@/components/trip-motion";
 import { InstallAppPanel } from "@/components/install-app-panel";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Attendance, calculateBalances, Expense, formatBaht, initialTripData, Member,
@@ -83,6 +83,7 @@ function TripApp() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
+  const saveInProgress = useRef(false);
 
   const loadTrip = useCallback(async () => {
     const response = await fetch("/api/trip", { cache: "no-store" });
@@ -120,9 +121,13 @@ function TripApp() {
   }, [notice]);
 
   const save = useCallback(async (update: (current: TripData) => TripData, successMessage = "บันทึกแล้ว") => {
-    setBusy(true); setError("");
-    const next = update(data);
+    // React state updates on the next render; this synchronous guard prevents
+    // a fast second click from sending another request with the same version.
+    if (saveInProgress.current) return;
+    saveInProgress.current = true;
+    setBusy(true); setError(""); setNotice("");
     try {
+      const next = update(data);
       const response = await fetch("/api/trip", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ version, data: next }) });
       const result = await response.json() as SavedTrip & { error?: string };
       if (response.status === 409) {
@@ -133,7 +138,7 @@ function TripApp() {
       setData(result.data); setVersion(result.version); setNotice(successMessage); setModal(null); setEditingExpense(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "บันทึกไม่สำเร็จ");
-    } finally { setBusy(false); }
+    } finally { saveInProgress.current = false; setBusy(false); }
   }, [data, version, loadTrip]);
 
   const enterTrip = async (event: FormEvent<HTMLFormElement>) => {
@@ -221,7 +226,7 @@ function TripApp() {
       <header className="topbar"><div className="mobile-brand"><TripLogoMark size={32} /><b>ทริปพลูวิลล่าหรรษา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> สมาชิก {data.members.length} คน</span><button className="mobile-logout" title="ออกจากทริป" aria-label="ออกจากทริป" onClick={logout}><LogOut size={16} /></button><button className="avatar avatar-you avatar-button" title="เปิดโปรไฟล์" onClick={() => setActivePage("profile")}>{myMember?.avatarUrl || myMember?.googleAvatarUrl || account.picture ? <Image src={myMember?.avatarUrl || myMember?.googleAvatarUrl || account.picture!} alt={`รูปโปรไฟล์ ${myMember?.name ?? account.name}`} width={44} height={44} unoptimized /> : (myMember?.name ?? account.name).slice(0, 1)}</button></div></header>
       <div className="page-content">
         {activePage === "home" && myMember && <Overview data={data} myMember={myMember} confirmed={confirmed.length} totalCost={totalCost} outstanding={outstanding} payments={payments} onNavigate={setActivePage} onModal={setModal} onPay={() => setActivePage("money")} />}
-        {activePage === "people" && <People data={data} balances={balances} accountId={account.id} onStatus={(id, attendance) => save((current) => ({ ...current, members: current.members.map((person) => person.id === id ? { ...person, attendance } : person) }))} />}
+        {activePage === "people" && <People data={data} balances={balances} accountId={account.id} busy={busy} onStatus={(id, attendance) => save((current) => ({ ...current, members: current.members.map((person) => person.id === id ? { ...person, attendance } : person) }), `บันทึกสถานะ “${statusText(attendance)}” แล้ว`)} />}
         {activePage === "money" && <Money data={data} balances={balances} payments={payments} totalCost={totalCost} ownMemberId={myMember?.id} busy={busy} onSubmitProof={submitProof} onConfirm={(id) => save((current) => ({ ...current, repayments: current.repayments.map((repayment) => repayment.id === id ? { ...repayment, status: "confirmed" } : repayment) }), "ยืนยันการชำระเงินแล้ว")} onAdd={() => { setEditingExpense(null); setModal("expense"); }} onEdit={(expense) => { setEditingExpense(expense); setModal("expense"); }} onDelete={(id) => save((current) => ({ ...current, expenses: current.expenses.filter((expense) => expense.id !== id) }), "ลบรายการแล้ว")} />}
         {activePage === "plan" && <Plan data={data} onModal={setModal} onTogglePacking={(id) => save((current) => ({ ...current, packing: current.packing.map((item) => item.id === id ? { ...item, done: !item.done } : item) }))} onDeletePacking={(id) => save((current) => ({ ...current, packing: current.packing.filter((item) => item.id !== id) }), "ลบรายการแล้ว")} onDeleteSchedule={(id) => save((current) => ({ ...current, schedule: current.schedule.filter((item) => item.id !== id) }), "ลบกำหนดการแล้ว")} />}
         {activePage === "profile" && myMember && <ProfilePage member={myMember} members={data.members} googlePicture={account.picture} busy={busy} onSave={(profile) => save((current) => ({ ...current, members: current.members.map((member) => member.id === myMember.id ? { ...member, ...profile } : member) }), "บันทึกโปรไฟล์แล้ว")} />}
@@ -230,7 +235,8 @@ function TripApp() {
     </section>
 
     <MobileTripNav items={navItems} activeKey={activePage} onChange={setActivePage} />
-    {notice && <div className="toast" role="status"><CheckCircle2 size={17} />{notice}</div>}
+    {busy && !notice && !error && <div className="toast toast-saving" role="status" aria-live="polite"><LoaderCircle className="toast-spinner" size={17} />กำลังบันทึกข้อมูล…</div>}
+    {notice && <div className="toast" role="status" aria-live="polite"><CheckCircle2 size={17} />{notice}</div>}
     {error && <div className="toast toast-error" role="alert"><CircleHelp size={17} />{error}<button onClick={() => setError("")} aria-label="ปิด"><X size={15} /></button></div>}
 
     {modal === "expense" && <ExpenseDialog expense={editingExpense} data={data} busy={busy} onClose={() => { setModal(null); setEditingExpense(null); }} onSave={(expense) => save((current) => ({ ...current, expenses: editingExpense ? current.expenses.map((item) => item.id === editingExpense.id ? { ...expense, id: item.id } : item) : [...current.expenses, { ...expense, id: makeId() }] }), editingExpense ? "อัปเดตรายจ่ายแล้ว" : "เพิ่มรายจ่ายแล้ว")} />}
@@ -324,11 +330,11 @@ function VillaCard({ villa, onEdit }: { villa: TripData["villa"]; onEdit: () => 
   return <><section className="villa-card"><div className="villa-cover"><button type="button" className="villa-cover-view" onClick={() => setLightboxOpen(true)} aria-label="ขยายภาพที่พัก"><Image className="villa-cover-photo" src={villaPhotos[activePhoto]} alt={`ภาพที่พักบ้านรมณ์ดี 4 ${activePhoto + 1}`} fill priority sizes="(max-width: 900px) 100vw, 420px" /></button><span className="villa-kicker"><MapPin size={13} /> STAY IN CHIANG MAI</span><button type="button" className="villa-expand-hint" onClick={() => setLightboxOpen(true)}>แตะเพื่อดูภาพเต็ม</button></div><div className="villa-gallery" aria-label="รูปภาพที่พัก">{villaPhotos.map((photo, index) => <button type="button" className={`villa-thumb ${activePhoto === index ? "active" : ""}`} key={photo} onClick={() => showPhoto(index)} aria-label={`ดูรูปที่พักภาพที่ ${index + 1}`} aria-pressed={activePhoto === index}><Image src={photo} alt="" width={72} height={48} sizes="72px" /></button>)}</div><div className="villa-info"><div><p className="eyebrow">OUR STAY</p><h2>บ้านรมณ์ดี 4 <span>พลูวิลล่าเชียงใหม่</span></h2><p className="villa-sub">Chiang Mai · Pool villa</p></div><button className="icon-button" onClick={onEdit} aria-label="แก้ไขข้อมูลที่พัก"><Settings2 size={17} /></button></div><div className="villa-details"><div><Clock3 size={15} /><span><b>{villa.checkIn || "ยังไม่ระบุ"}</b><small>เช็กอิน</small></span></div><div><Clock3 size={15} /><span><b>{villa.checkOut || "ยังไม่ระบุ"}</b><small>เช็กเอาต์</small></span></div><a href={`tel:${phone.replace(/[^\d+]/g, "")}`}><Phone size={15} /><span><b>{phone}</b><small>เบอร์ติดต่อที่พัก</small></span></a></div><div className="villa-bottom">{villa.address ? <span><MapPin size={14} />{villa.address}</span> : <span className="muted-location"><MapPin size={14} />ตำแหน่งที่พักในเชียงใหม่</span>}<a href={mapUrl} target="_blank" rel="noreferrer">เปิดแผนที่ <ArrowUpRight size={13} /></a></div></section>{lightboxOpen && typeof document !== "undefined" && createPortal(<div className="villa-lightbox" role="dialog" aria-modal="true" aria-label={`ภาพที่พักภาพที่ ${activePhoto + 1} จาก ${villaPhotos.length}`} onClick={() => setLightboxOpen(false)}><button type="button" className="villa-lightbox-close" onClick={() => setLightboxOpen(false)} aria-label="ปิดภาพเต็ม"><X size={22} /></button><button type="button" className="villa-lightbox-nav previous" onClick={(event) => { event.stopPropagation(); changePhoto(-1); }} aria-label="ดูภาพก่อนหน้า"><ChevronLeft size={28} /></button><div className="villa-lightbox-image" onClick={(event) => event.stopPropagation()}><Image src={villaPhotos[activePhoto]} alt={`ภาพที่พักบ้านรมณ์ดี 4 ${activePhoto + 1}`} fill sizes="100vw" priority /></div><button type="button" className="villa-lightbox-nav next" onClick={(event) => { event.stopPropagation(); changePhoto(1); }} aria-label="ดูภาพถัดไป"><ChevronRight size={28} /></button><span className="villa-lightbox-count">{activePhoto + 1} / {villaPhotos.length}</span></div>, document.body)}</>;
 }
 
-function People({ data, balances, accountId, onStatus }: { data: TripData; balances: ReturnType<typeof calculateBalances>; accountId: string; onStatus: (id: string, status: Attendance) => void }) {
+function People({ data, balances, accountId, busy, onStatus }: { data: TripData; balances: ReturnType<typeof calculateBalances>; accountId: string; busy: boolean; onStatus: (id: string, status: Attendance) => void }) {
   const groups: { status: Attendance; label: string; eyebrow: string }[] = [{ status: "going", label: "ไปแน่นอน", eyebrow: "พร้อมไป" }, { status: "pending", label: "รอตอบ", eyebrow: "รอคอนเฟิร์ม" }, { status: "not-going", label: "ไม่ไป", eyebrow: "ครั้งหน้าเจอกัน" }];
   return <><div className="page-heading"><div><p className="eyebrow">THE CREW · {data.members.length} คน</p><h1>เพื่อนร่วมทริป</h1><p className="heading-sub">สมาชิกจะแสดงที่นี่เมื่อเข้าสู่ระบบและยืนยันรหัสทริป</p></div></div>
     <div className="people-summary"><div><b>{data.members.filter((person) => person.attendance === "going").length}</b><span>พร้อมไป</span></div><div><b>{data.members.filter((person) => person.attendance === "pending").length}</b><span>รอตอบ</span></div><div><b>{data.members.filter((person) => person.role === "organizer").length}</b><span>คนจัดทริป</span></div><div className="summary-note"><Users size={17} /><span>แตะสถานะเพื่ออัปเดตคำตอบของคุณได้เลย</span></div></div>
-    {!data.members.length ? <section className="panel empty-large"><div className="empty-state"><span className="empty-symbol"><Users size={18} /></span><b>ยังไม่มีสมาชิกในทริป</b><p>สมาชิกจะถูกเพิ่มอัตโนมัติ เมื่อเข้าสู่ระบบด้วย Google และยืนยันรหัสทริป</p></div></section> : groups.map((group) => { const members = data.members.filter((person) => person.attendance === group.status); return members.length ? <section className="panel people-group" key={group.status}><div className="panel-head"><div><p className="eyebrow">{group.eyebrow}</p><h2>{group.label} <span className="count-bubble">{members.length}</span></h2></div></div><div className="member-card-grid">{members.map((person, index) => { const net = balances.find((balance) => balance.memberId === person.id)?.amount ?? 0; const isOwnProfile = person.accountId === accountId; return <article className="member-card" key={person.id}><div className="member-card-head"><Avatar name={person.name} index={index} image={person.avatarUrl || person.googleAvatarUrl} /><span className="member-card-name"><b>{person.name}</b><small>{person.role === "organizer" ? "ผู้จัดทริป" : "สมาชิก"}{isOwnProfile ? " · คุณ" : ""}</small></span>{person.role === "organizer" && <span className="organizer-tag">คนจัดทริป</span>}</div><div className="member-card-balance"><span>ยอดสุทธิ</span><b className={net > 0 ? "positive-money" : net < 0 ? "negative-money" : "muted-money"}>{net ? `${net > 0 ? "+" : "−"}${formatBaht(Math.abs(net))}` : "ยังไม่มี"}</b></div><div className="member-card-actions"><label><span>สถานะ</span><select disabled={!isOwnProfile} className={`status-select ${statusClass(person.attendance)}`} value={person.attendance} aria-label={`สถานะของ ${person.name}`} onChange={(event) => onStatus(person.id, event.target.value as Attendance)}><option value="pending">รอตอบ</option><option value="going">ไปแน่นอน</option><option value="not-going">ไม่ไป</option></select></label></div></article>; })}</div></section> : null; })}
+    {!data.members.length ? <section className="panel empty-large"><div className="empty-state"><span className="empty-symbol"><Users size={18} /></span><b>ยังไม่มีสมาชิกในทริป</b><p>สมาชิกจะถูกเพิ่มอัตโนมัติ เมื่อเข้าสู่ระบบด้วย Google และยืนยันรหัสทริป</p></div></section> : groups.map((group) => { const members = data.members.filter((person) => person.attendance === group.status); return members.length ? <section className="panel people-group" key={group.status}><div className="panel-head"><div><p className="eyebrow">{group.eyebrow}</p><h2>{group.label} <span className="count-bubble">{members.length}</span></h2></div></div><div className="member-card-grid">{members.map((person, index) => { const net = balances.find((balance) => balance.memberId === person.id)?.amount ?? 0; const isOwnProfile = person.accountId === accountId; return <article className="member-card" key={person.id}><div className="member-card-head"><Avatar name={person.name} index={index} image={person.avatarUrl || person.googleAvatarUrl} /><span className="member-card-name"><b>{person.name}</b><small>{person.role === "organizer" ? "ผู้จัดทริป" : "สมาชิก"}{isOwnProfile ? " · คุณ" : ""}</small></span>{person.role === "organizer" && <span className="organizer-tag">คนจัดทริป</span>}</div><div className="member-card-balance"><span>ยอดสุทธิ</span><b className={net > 0 ? "positive-money" : net < 0 ? "negative-money" : "muted-money"}>{net ? `${net > 0 ? "+" : "−"}${formatBaht(Math.abs(net))}` : "ยังไม่มี"}</b></div><div className="member-card-actions"><label><span>สถานะ</span><select disabled={!isOwnProfile || busy} className={`status-select ${statusClass(person.attendance)}`} value={person.attendance} aria-label={`สถานะของ ${person.name}`} onChange={(event) => onStatus(person.id, event.target.value as Attendance)}><option value="pending">รอตอบ</option><option value="going">ไปแน่นอน</option><option value="not-going">ไม่ไป</option></select></label></div></article>; })}</div></section> : null; })}
     <div className="info-strip"><ShieldCheck size={16} /><span>ค่าใช้จ่ายส่วนกลางจะหารเฉพาะคนที่ยืนยันว่าไป ปรับผู้ร่วมจ่ายได้ในแต่ละรายการ</span></div>
   </>;
 }

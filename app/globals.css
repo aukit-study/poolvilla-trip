@@ -174,3 +174,5 @@ body,.app-shell{font-size:15px}.nav-link{font-size:14px}.brand-lockup b{font-siz
   .pwa-install-button,.pwa-installed{grid-column:2;justify-self:start}
   .pwa-install-steps{grid-column:1/-1}
 }
+
+.toast-saving{background:#155f85}.toast-spinner{animation:toast-spin .9s linear infinite}@keyframes toast-spin{to{transform:rotate(360deg)}}.status-select:disabled{opacity:.68;cursor:wait}
