@@ -130,7 +130,7 @@ function TripApp() {
         throw new Error("มีคนบันทึกข้อมูลก่อนหน้าแล้ว โหลดข้อมูลล่าสุดให้แล้ว กรุณาลองแก้ไขอีกครั้ง");
       }
       if (!response.ok) throw new Error(result.error ?? "บันทึกไม่สำเร็จ");
-    setData(result.data); setVersion(result.version); setNotice(successMessage); setModal(null); setEditingExpense(null);
+      setData(result.data); setVersion(result.version); setNotice(successMessage); setModal(null); setEditingExpense(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "บันทึกไม่สำเร็จ");
     } finally { setBusy(false); }
@@ -218,7 +218,7 @@ function TripApp() {
     </aside>
 
     <section className="main-column">
-      <header className="topbar"><div className="mobile-brand"><TripLogoMark size={32} /><b>ทริปพลูวิลล่าหรรษา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> ข้อมูลกลุ่ม</span><button className="mobile-logout" title="ออกจากทริป" aria-label="ออกจากทริป" onClick={logout}><LogOut size={16} /></button><button className="avatar avatar-you avatar-button" title="เปิดโปรไฟล์" onClick={() => setActivePage("profile")}>{myMember?.avatarUrl || myMember?.googleAvatarUrl || account.picture ? <Image src={myMember?.avatarUrl || myMember?.googleAvatarUrl || account.picture!} alt={`รูปโปรไฟล์ ${myMember?.name ?? account.name}`} width={44} height={44} unoptimized /> : (myMember?.name ?? account.name).slice(0, 1)}</button></div></header>
+      <header className="topbar"><div className="mobile-brand"><TripLogoMark size={32} /><b>ทริปพลูวิลล่าหรรษา</b></div><div className="breadcrumbs"><span>Trip space</span><ChevronRight size={14} /><b>{pageLabel}</b></div><div className="top-actions"><span className="live-pill"><i /> สมาชิก {data.members.length} คน</span><button className="mobile-logout" title="ออกจากทริป" aria-label="ออกจากทริป" onClick={logout}><LogOut size={16} /></button><button className="avatar avatar-you avatar-button" title="เปิดโปรไฟล์" onClick={() => setActivePage("profile")}>{myMember?.avatarUrl || myMember?.googleAvatarUrl || account.picture ? <Image src={myMember?.avatarUrl || myMember?.googleAvatarUrl || account.picture!} alt={`รูปโปรไฟล์ ${myMember?.name ?? account.name}`} width={44} height={44} unoptimized /> : (myMember?.name ?? account.name).slice(0, 1)}</button></div></header>
       <div className="page-content">
         {activePage === "home" && myMember && <Overview data={data} myMember={myMember} confirmed={confirmed.length} totalCost={totalCost} outstanding={outstanding} payments={payments} onNavigate={setActivePage} onModal={setModal} onPay={() => setActivePage("money")} />}
         {activePage === "people" && <People data={data} balances={balances} accountId={account.id} onStatus={(id, attendance) => save((current) => ({ ...current, members: current.members.map((person) => person.id === id ? { ...person, attendance } : person) }))} />}
@@ -244,7 +244,7 @@ function Overview({ data, myMember, confirmed, totalCost, outstanding, payments,
   data: TripData; myMember: Member; confirmed: number; totalCost: number; outstanding: number; payments: ReturnType<typeof suggestPayments>;
   onNavigate: (page: PageKey) => void; onModal: (modal: ModalKey) => void; onPay: () => void;
 }) {
-  const [showCrew, setShowCrew] = useState(false);
+  const [showCrew, setShowCrew] = useState(true);
   return <>
     <div className="page-heading"><div><p className="eyebrow">FRIENDS GETAWAY <span>·</span> CHIANG MAI</p><h1>ทริปเชียงใหม่ <span className="heading-sparkle"><Compass size={22} strokeWidth={2.25} aria-hidden="true" /></span></h1><p className="heading-sub">1–2 พฤศจิกายน · ดูแพลน เพื่อนร่วมทริป และยอดที่ต้องเคลียร์ในที่เดียว</p></div><button className="button button-outline" onClick={() => onNavigate("people")}><Users size={17} /> ดูสมาชิก</button></div>
     <MyNextActions data={data} member={myMember} payments={payments} onNavigate={onNavigate} />
