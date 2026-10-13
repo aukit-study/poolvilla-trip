@@ -141,6 +141,11 @@ body,.app-shell{font-size:15px}.nav-link{font-size:14px}.brand-lockup b{font-siz
   .trip-banner:after{background:linear-gradient(90deg,#0878b8 0%,rgba(8,120,184,.98) 38%,rgba(8,120,184,.8) 60%,rgba(8,120,184,.28) 100%),linear-gradient(0deg,rgba(3,72,113,.24),transparent 55%);}
   .trip-banner .banner-copy{width:70%;}
 }
+.mobile-logout{display:none}
+.crew-toggle-icon{transition:transform .2s ease}
+.crew-toggle-icon.is-open{transform:rotate(180deg)}
+@media(max-width:650px){.mobile-logout{width:29px;height:29px;display:grid;place-items:center;border:1px solid #dcebf3;border-radius:50%;background:#fff;color:#1878a8;cursor:pointer}.mobile-logout:active{background:#eaf6fc}}
+@media(max-width:360px){.topbar{padding:0 11px}.top-actions{gap:6px}.live-pill{display:none}}
 
 .pwa-install-panel{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:14px;margin-bottom:14px;padding:18px 20px;border-color:#d8eaf4;background:linear-gradient(115deg,#fff 22%,#f1faff 100%)}
 .pwa-install-icon{width:46px;height:46px;display:grid;place-items:center;border-radius:15px;color:#087dc1;background:#e4f5fd}
