@@ -121,14 +121,16 @@ export async function PUT(request: Request) {
     const sql = database();
     const oldRepayments = new Map(current.repayments.map((repayment) => [repayment.id, repayment]));
     const newRepayments = new Map(next.repayments.map((repayment) => [repayment.id, repayment]));
+    const newlyConfirmed = new Set<string>();
     for (const previous of current.repayments) {
       const proposed = newRepayments.get(previous.id);
       if (!proposed) return json({ error: "ลบประวัติการชำระเงินไม่ได้" }, 403);
-      const unchanged = previous.from === proposed.from && previous.to === proposed.to && previous.amount === proposed.amount && previous.date === proposed.date && previous.proofId === proposed.proofId;
+      const unchanged = previous.from === proposed.from && previous.to === proposed.to && previous.amount === proposed.amount && previous.date === proposed.date && previous.proofId === proposed.proofId && previous.confirmedAt === proposed.confirmedAt;
       if (!unchanged) return json({ error: "แก้ไขรายการชำระเงินที่มีอยู่ไม่ได้" }, 403);
       if ((previous.status ?? "confirmed") !== (proposed.status ?? "confirmed") && (previous.status !== "pending" || proposed.status !== "confirmed" || previous.to !== ownMember.id)) {
         return json({ error: "เฉพาะผู้รับเงินเท่านั้นที่ยืนยันสลิปได้" }, 403);
       }
+      if (previous.status === "pending" && proposed.status === "confirmed") newlyConfirmed.add(previous.id);
     }
     for (const repayment of next.repayments) {
       if (!oldRepayments.has(repayment.id) && (repayment.from !== ownMember.id || repayment.status !== "pending" || !repayment.proofId)) {
@@ -140,7 +142,11 @@ export async function PUT(request: Request) {
         if (!row || row.payer_member_id !== repayment.from || row.payee_member_id !== repayment.to || Number(row.amount) !== repayment.amount) return json({ error: "ไม่พบสลิปที่ตรงกับรายการชำระเงินนี้" }, 400);
       }
     }
-    const rows = await sql`UPDATE trip_state SET state = ${JSON.stringify(body.data)}::jsonb,
+    const stateToSave: TripData = newlyConfirmed.size ? {
+      ...next,
+      repayments: next.repayments.map((repayment) => newlyConfirmed.has(repayment.id) ? { ...repayment, confirmedAt: new Date().toISOString() } : repayment),
+    } : next;
+    const rows = await sql`UPDATE trip_state SET state = ${JSON.stringify(stateToSave)}::jsonb,
       version = version + 1, updated_at = NOW()
       WHERE id = 1 AND version = ${body.version}
       RETURNING state, version`;

@@ -33,6 +33,7 @@ export type Repayment = {
   date: string;
   status?: "pending" | "confirmed";
   proofId?: string;
+  confirmedAt?: string;
 };
 
 export type ScheduleItem = {
@@ -161,6 +162,7 @@ export function validateTripData(value: unknown): value is TripData {
     if (!repayment || typeof repayment.id !== "string" || !memberIds.has(repayment.from) || !memberIds.has(repayment.to) || repayment.from === repayment.to || !Number.isSafeInteger(repayment.amount) || repayment.amount <= 0 || typeof repayment.date !== "string") return false;
     if (repayment.status !== undefined && repayment.status !== "pending" && repayment.status !== "confirmed") return false;
     if (repayment.proofId !== undefined && (typeof repayment.proofId !== "string" || repayment.proofId.length > 100)) return false;
+    if (repayment.confirmedAt !== undefined && (typeof repayment.confirmedAt !== "string" || repayment.confirmedAt.length > 40 || Number.isNaN(Date.parse(repayment.confirmedAt)))) return false;
   }
   for (const item of [...data.schedule!, ...data.packing!]) {
     if (!item || typeof item.id !== "string" || typeof item.title !== "string" || !item.title.trim() || item.title.length > 160) return false;
