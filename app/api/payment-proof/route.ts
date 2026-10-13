@@ -15,14 +15,28 @@ function database() {
   return neon(url);
 }
 
+let tripTableReady: Promise<void> | undefined;
+let proofTableReady: Promise<void> | undefined;
+
+async function ensureTripTable() {
+  if (!tripTableReady) {
+    const sql = database();
+    tripTableReady = (async () => {
+      await sql`CREATE TABLE IF NOT EXISTS trip_state (
+        id SMALLINT PRIMARY KEY CHECK (id = 1), state JSONB NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`;
+      await sql`INSERT INTO trip_state (id, state, version, updated_at)
+        VALUES (1, ${JSON.stringify(initialTripData)}::jsonb, 1, NOW()) ON CONFLICT (id) DO NOTHING`;
+    })();
+  }
+  try { await tripTableReady; }
+  catch (error) { tripTableReady = undefined; throw error; }
+}
+
 async function readTrip() {
+  await ensureTripTable();
   const sql = database();
-  await sql`CREATE TABLE IF NOT EXISTS trip_state (
-    id SMALLINT PRIMARY KEY CHECK (id = 1), state JSONB NOT NULL,
-    version INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`;
-  await sql`INSERT INTO trip_state (id, state, version, updated_at)
-    VALUES (1, ${JSON.stringify(initialTripData)}::jsonb, 1, NOW()) ON CONFLICT (id) DO NOTHING`;
   const rows = await sql`SELECT state FROM trip_state WHERE id = 1`;
   const state = rows[0]?.state;
   const data = typeof state === "string" ? JSON.parse(state) as unknown : state;
@@ -30,16 +44,20 @@ async function readTrip() {
 }
 
 async function ensureProofTable() {
-  const sql = database();
-  await sql`CREATE TABLE IF NOT EXISTS payment_proofs (
-    id TEXT PRIMARY KEY,
-    payer_member_id TEXT NOT NULL,
-    payee_member_id TEXT NOT NULL,
-    amount INTEGER NOT NULL CHECK (amount > 0),
-    image_type TEXT NOT NULL,
-    image_base64 TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`;
+  if (!proofTableReady) {
+    const sql = database();
+    proofTableReady = sql`CREATE TABLE IF NOT EXISTS payment_proofs (
+      id TEXT PRIMARY KEY,
+      payer_member_id TEXT NOT NULL,
+      payee_member_id TEXT NOT NULL,
+      amount INTEGER NOT NULL CHECK (amount > 0),
+      image_type TEXT NOT NULL,
+      image_base64 TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`.then(() => undefined);
+  }
+  try { await proofTableReady; }
+  catch (error) { proofTableReady = undefined; throw error; }
 }
 
 export async function POST(request: Request) {

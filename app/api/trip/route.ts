@@ -17,17 +17,27 @@ function database() {
   return neon(url);
 }
 
+let tripTableReady: Promise<void> | undefined;
+
+async function ensureTripTable() {
+  if (!tripTableReady) {
+    const sql = database();
+    tripTableReady = (async () => {
+      await sql`CREATE TABLE IF NOT EXISTS trip_state (
+        id SMALLINT PRIMARY KEY CHECK (id = 1), state JSONB NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`;
+      await sql`INSERT INTO trip_state (id, state, version, updated_at)
+        VALUES (1, ${JSON.stringify(initialTripData)}::jsonb, 1, NOW()) ON CONFLICT (id) DO NOTHING`;
+    })();
+  }
+  try { await tripTableReady; }
+  catch (error) { tripTableReady = undefined; throw error; }
+}
+
 async function readTrip(): Promise<TripRow> {
+  await ensureTripTable();
   const sql = database();
-  await sql`CREATE TABLE IF NOT EXISTS trip_state (
-    id SMALLINT PRIMARY KEY CHECK (id = 1),
-    state JSONB NOT NULL,
-    version INTEGER NOT NULL DEFAULT 1,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`;
-  await sql`INSERT INTO trip_state (id, state, version, updated_at)
-    VALUES (1, ${JSON.stringify(initialTripData)}::jsonb, 1, NOW())
-    ON CONFLICT (id) DO NOTHING`;
   const rows = await sql`SELECT state, version FROM trip_state WHERE id = 1`;
   const row = rows[0] as TripRow | undefined;
   if (!row) throw new Error("Trip state is missing");
