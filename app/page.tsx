@@ -393,14 +393,44 @@ function ProfilePage({ member, members, googlePicture, busy, onSave }: { member:
   const [qrDataUrl, setQrDataUrl] = useState(member.qrDataUrl ?? "");
   const [fileError, setFileError] = useState("");
   const [cropSource, setCropSource] = useState("");
+  const [qrProcessing, setQrProcessing] = useState(false);
   useEffect(() => () => { if (cropSource) URL.revokeObjectURL(cropSource); }, [cropSource]);
-  const updateQr = (file?: File) => {
+  const updateQr = async (file?: File) => {
     if (!file) return;
-    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 180_000) { setFileError("เลือกรูปภาพขนาดไม่เกิน 180 KB"); return; }
-    const reader = new FileReader();
-    reader.onload = () => { setQrDataUrl(String(reader.result)); setFileError(""); };
-    reader.onerror = () => setFileError("อ่านไฟล์รูปไม่สำเร็จ");
-    reader.readAsDataURL(file);
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 15_000_000) { setFileError("เลือกรูป QR แบบ PNG, JPG หรือ WebP ขนาดไม่เกิน 15 MB"); return; }
+    setFileError(""); setQrProcessing(true);
+    try {
+      const image = await createImageBitmap(file);
+      try {
+        const canvas = document.createElement("canvas");
+        let maxDimension = 1200;
+        while (true) {
+          const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("canvas_unavailable");
+          context.imageSmoothingEnabled = false;
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+          if (blob && blob.size <= 200_000) {
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("read_failed"));
+              reader.onerror = () => reject(new Error("read_failed"));
+              reader.readAsDataURL(blob);
+            });
+            setQrDataUrl(dataUrl);
+            return;
+          }
+          if (maxDimension <= 256) break;
+          maxDimension = Math.max(256, Math.floor(maxDimension * 0.82));
+        }
+        throw new Error("image_too_large");
+      } finally { image.close(); }
+    } catch {
+      setFileError("ย่อรูป QR ไม่สำเร็จ ลองใช้รูป PNG หรือ JPG ที่ชัดและไม่เกิน 15 MB");
+    } finally { setQrProcessing(false); }
   };
   const updateAvatar = (file?: File) => {
     if (!file) return;
@@ -416,8 +446,8 @@ function ProfilePage({ member, members, googlePicture, busy, onSave }: { member:
       <Field label="ชื่อที่เพื่อนเห็น"><input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="ชื่อเล่น" required /></Field>
       <div className="field-grid"><Field label="PromptPay (จำเป็น)" hint="ใส่เบอร์หรือเลขประจำตัวที่ผูกพร้อมเพย์"><input value={promptPay} onChange={(event) => setPromptPay(event.target.value)} maxLength={80} placeholder="เช่น เบอร์มือถือ" required /></Field><Field label="ชื่อธนาคาร (ไม่จำเป็น)" hint="กรอกเมื่ออยากให้เพื่อนโอนเข้าบัญชีธนาคาร"><input value={bankName} onChange={(event) => setBankName(event.target.value)} maxLength={100} placeholder="เช่น กสิกรไทย" /></Field></div>
       <div className="field-grid"><Field label="ชื่อบัญชี (ไม่จำเป็น)"><input value={bankAccountName} onChange={(event) => setBankAccountName(event.target.value)} maxLength={100} placeholder="ชื่อตามบัญชีธนาคาร" /></Field><Field label="เลขบัญชี (ไม่จำเป็น)"><input value={bankAccountNumber} onChange={(event) => setBankAccountNumber(event.target.value)} maxLength={50} placeholder="เลขบัญชีรับเงิน" /></Field></div>
-      <Field label="QR รับเงิน (จำเป็น)" hint="ใช้ QR พร้อมเพย์หรือ QR รับเงิน · PNG/JPG/WebP ไม่เกิน 180 KB"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => updateQr(event.target.files?.[0])} required={!qrDataUrl} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>เปลี่ยน QR</button></div>}</Field>
-      {fileError && <small className="field-error">{fileError}</small>}<div className="dialog-actions"><span /><button className="button button-primary" disabled={busy}>{busy ? "กำลังบันทึก…" : "บันทึกโปรไฟล์"}</button></div>
+      <Field label="QR รับเงิน (จำเป็น)" hint="ใช้ QR พร้อมเพย์หรือ QR รับเงิน · PNG/JPG/WebP ไม่เกิน 15 MB ระบบย่อรูปก่อนบันทึก"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { void updateQr(event.target.files?.[0]); event.target.value = ""; }} required={!qrDataUrl} />{qrDataUrl && <div className="qr-preview"><Image src={qrDataUrl} alt="QR รับเงินของฉัน" width={140} height={140} unoptimized /><button type="button" className="button button-outline button-compact" onClick={() => setQrDataUrl("")}>เปลี่ยน QR</button></div>}</Field>
+      {qrProcessing && <small>กำลังย่อรูป QR ให้เหมาะกับการจัดเก็บ…</small>}{fileError && <small className="field-error">{fileError}</small>}<div className="dialog-actions"><span /><button className="button button-primary" disabled={busy || qrProcessing}>{busy ? "กำลังบันทึก…" : qrProcessing ? "กำลังเตรียม QR…" : "บันทึกโปรไฟล์"}</button></div>
     </form></section>
     {cropSource && <AvatarCropDialog source={cropSource} onClose={() => setCropSource("")} onApply={(cropped) => { setAvatarUrl(cropped); setCropSource(""); }} />}
     <InstallAppPanel />
